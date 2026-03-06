@@ -19,6 +19,7 @@ pkt/
 ├── go.work
 ├── windivert/           module pkt/windivert   [//go:build windows]
 ├── afpacket/            module pkt/afpacket    [//go:build linux]
+├── bpf/                 module pkt/bpf         [//go:build linux]
 └── capture/             module pkt/capture     [cross-platform]
 ```
 
@@ -30,9 +31,9 @@ pkt/
 
 ```
 filter/
-  lexer.go       tokenize la string filtre WinDivert 2.x
-  parser.go      recursive descent → AST
-  compiler.go    AST → []WINDIVERT_FILTER_OBJECT (bytecode)
+  grammar.peg    grammaire PEG WinDivert 2.x (source pigeon)
+  grammar.go     GÉNÉRÉ — go generate (ne pas éditer)
+  compiler.go    AST pigeon → []WINDIVERT_FILTER_OBJECT (bytecode)
   fields.go      table des champs (ip.*, tcp.*, udp.*, icmp.*, ipv6.*)
 
 driver/
@@ -61,11 +62,13 @@ windivert.go     Open(filter, layer, priority, ...Option) (*Handle, error)
 
 ### Filter compiler
 
-Full WinDivert 2.x filter language. Bytecode : tableau de `WINDIVERT_FILTER_OBJECT` :
+Grammaire PEG dans `filter/grammar.peg`, générée avec **pigeon** (`go generate`).
+Le fichier généré `grammar.go` est commité — pas de dépendance runtime sur pigeon.
+`compiler.go` traverse l'AST pigeon et émet le bytecode `[]WINDIVERT_FILTER_OBJECT` :
 ```
 { field, test, arg[4], success_jump, failure_jump }
 ```
-Référence : code source WinDivert C + constantes de `go-windivert2`.
+Référence : code source WinDivert C + constantes de `imgk/divert-go`.
 
 ### API
 
@@ -76,6 +79,23 @@ h, err := windivert.Open("tcp.DstPort == 443",
 defer h.Close()
 // h implémente gopacket.PacketDataSource
 ```
+
+---
+
+## Package `pkt/bpf`
+
+### Composants
+
+```text
+bpf/
+  bpf.go         Compile(expr string)([]bpf.Instruction,error)
+                 Attach(fd int, filter []bpf.Instruction)error
+                 Detach(fd int)error
+```
+
+Parse pcap-filter style strings (`tcp port 80`, `ip`, `host x.x.x.x`) via
+`packetcap/go-pcap/filter`. Attache au socket via `SO_ATTACH_FILTER`
+(`unix.SetsockoptSockFprog`). Utilisé par `pkt/afpacket` via `WithFilter(expr)`.
 
 ---
 
@@ -95,7 +115,9 @@ Pas de TPACKET_V3 en V1 (YAGNI). Frames Ethernet complètes (layer 2).
 ### API
 
 ```go
-h, err := afpacket.Open("eth0", afpacket.WithPromiscuous(true))
+h, err := afpacket.Open("eth0",
+    afpacket.WithPromiscuous(true),
+    afpacket.WithFilter("tcp port 80"))  // BPF kernel-side via pkt/bpf
 defer h.Close()
 // h implémente gopacket.PacketDataSource
 ```
@@ -120,10 +142,12 @@ for pkt := range ps.Packets() { fmt.Println(pkt) }
 
 ## Dépendances
 
-| Module          | Dépendance                          |
-|-----------------|-------------------------------------|
-| pkt/windivert   | golang.org/x/sys/windows, gopacket  |
-| pkt/afpacket    | golang.org/x/sys/unix, gopacket     |
-| pkt/capture     | pkt/windivert ou pkt/afpacket, gopacket |
+| Module        | Dépendances runtime                                          |
+|---------------|--------------------------------------------------------------|
+| pkt/bpf       | packetcap/go-pcap/filter, golang.org/x/net/bpf, x/sys/unix  |
+| pkt/windivert | golang.org/x/sys/windows, gopacket                          |
+| pkt/afpacket  | pkt/bpf, golang.org/x/sys/unix, gopacket                    |
+| pkt/capture   | pkt/windivert ou pkt/afpacket, gopacket                     |
 
-Référence non-runtime : source C WinDivert 2.x + go-windivert2 pour les constantes.
+Outil build-time (non-runtime) : `github.com/mna/pigeon` (go generate, go install).
+Référence non-dépendance : source C WinDivert 2.x + `imgk/divert-go` pour les constantes.
