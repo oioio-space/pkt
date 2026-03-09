@@ -8,17 +8,29 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"unsafe"
 )
 
-// FilterObject is a WinDivert bytecode object passed to the driver via DeviceIoControl.
+// Sentinel jump-target values used during compilation (replaced by patchJumps).
+const (
+	acceptSentinel uint16 = 0xFFFF // → len(prog)   = ACCEPT
+	rejectSentinel uint16 = 0xFFFE // → len(prog)+1 = REJECT
+)
+
+// FilterObject holds one instruction in the WinDivert filter bytecode.
+// Wire layout (24 bytes, matches WINDIVERT_FILTER in windivert_device.h):
+//
+//	word0 [31:16]=success [15:11]=test [10:0]=field
+//	word1 [31:17]=reserved [16]=neg [15:0]=failure
+//	arg[0..3] = 128-bit comparison value
+//
+// Use Bytes() to serialize to the wire format.
 type FilterObject struct {
-	Val     [4]uint32
-	Field   uint32
-	Test    uint8
-	Neg     uint8
-	Success uint16
-	Failure uint16
+	Field   uint32    // 11-bit field ID (WINDIVERT_FILTER_FIELD_*)
+	Test    uint8     // 5-bit test code (testEQ..testFalse)
+	Neg     uint8     // 1-bit negation flag
+	Success uint16    // 16-bit success jump index (or acceptSentinel/rejectSentinel)
+	Failure uint16    // 16-bit failure jump index (or acceptSentinel/rejectSentinel)
+	Arg     [4]uint32 // 128-bit comparison value
 }
 
 const (
@@ -32,7 +44,7 @@ const (
 	testFalse uint8 = 7
 )
 
-// Compile compiles a WinDivert 2.x filter string into bytecode.
+// Compile compiles a WinDivert 2.x filter string into bytecode objects.
 func Compile(filterStr string) ([]FilterObject, error) {
 	ast, err := Parse("filter", []byte(filterStr))
 	if err != nil {
@@ -57,13 +69,17 @@ func (c *compiler) emit(n Node) error {
 		if !node.Value {
 			test = testFalse
 		}
-		c.prog = append(c.prog, FilterObject{Test: test})
+		c.prog = append(c.prog, FilterObject{
+			Test: test, Success: acceptSentinel, Failure: rejectSentinel,
+		})
 	case *FieldNode:
 		def, err := LookupField(node.Parts)
 		if err != nil {
 			return err
 		}
-		c.prog = append(c.prog, FilterObject{Field: def.ID, Test: testTrue})
+		c.prog = append(c.prog, FilterObject{
+			Field: def.ID, Test: testTrue, Success: acceptSentinel, Failure: rejectSentinel,
+		})
 	case *CmpNode:
 		return c.emitCmp(node)
 	case *UnaryNode:
@@ -71,9 +87,10 @@ func (c *compiler) emit(n Node) error {
 		if err := c.emit(node.Child); err != nil {
 			return err
 		}
+		// NOT: swap accept ↔ reject sentinels; leave resolved indices unchanged.
 		for i := start; i < len(c.prog); i++ {
-			c.prog[i].Success, c.prog[i].Failure = c.prog[i].Failure, c.prog[i].Success
-			c.prog[i].Neg ^= 1
+			c.prog[i].Success = swapSentinel(c.prog[i].Success)
+			c.prog[i].Failure = swapSentinel(c.prog[i].Failure)
 		}
 	case *BinaryNode:
 		return c.emitBinary(node)
@@ -83,19 +100,31 @@ func (c *compiler) emit(n Node) error {
 	return nil
 }
 
+func swapSentinel(v uint16) uint16 {
+	switch v {
+	case acceptSentinel:
+		return rejectSentinel
+	case rejectSentinel:
+		return acceptSentinel
+	}
+	return v // resolved index — leave as-is
+}
+
 func (c *compiler) emitCmp(n *CmpNode) error {
 	def, err := LookupField(n.Field)
 	if err != nil {
 		return err
 	}
-	val, err := parseValue(n.Value, n.VTok, def.Kind)
+	arg, err := parseValue(n.Value, n.VTok, def.Kind)
 	if err != nil {
 		return err
 	}
 	c.prog = append(c.prog, FilterObject{
-		Field: def.ID,
-		Val:   val,
-		Test:  opToTest(n.Op),
+		Field:   def.ID,
+		Arg:     arg,
+		Test:    opToTest(n.Op),
+		Success: acceptSentinel,
+		Failure: rejectSentinel,
 	})
 	return nil
 }
@@ -106,34 +135,45 @@ func (c *compiler) emitBinary(n *BinaryNode) error {
 		return err
 	}
 	leftEnd := len(c.prog)
+
 	if err := c.emit(n.Right); err != nil {
 		return err
 	}
-	rightEnd := len(c.prog)
 
-	// AND: left failure → skip right (REJECT); left success → fall through to right
-	// OR:  left success → skip right (ACCEPT); left failure → fall through to right
+	// Resolve unresolved jumps in the LEFT operand only.
+	// Right operand's sentinels are left for patchJumps or outer expressions.
 	if n.Op == "and" {
+		// AND: left success → check right (leftEnd); left failure → stays rejectSentinel.
 		for i := leftStart; i < leftEnd; i++ {
-			c.prog[i].Failure = uint16(rightEnd)
+			if c.prog[i].Success == acceptSentinel {
+				c.prog[i].Success = uint16(leftEnd)
+			}
 		}
 	} else { // or
+		// OR: left failure → check right (leftEnd); left success → stays acceptSentinel.
 		for i := leftStart; i < leftEnd; i++ {
-			c.prog[i].Success = uint16(rightEnd)
+			if c.prog[i].Failure == rejectSentinel {
+				c.prog[i].Failure = uint16(leftEnd)
+			}
 		}
 	}
 	return nil
 }
 
-// patchJumps fills in zero (unset) jump targets with final accept/reject indices.
+// patchJumps replaces remaining sentinels with final ACCEPT/REJECT indices.
 func (c *compiler) patchJumps() {
-	last := uint16(len(c.prog))
+	accept := uint16(len(c.prog))   // ACCEPT = one past last instruction
+	reject := uint16(len(c.prog)) + 1 // REJECT = two past last instruction
 	for i := range c.prog {
-		if c.prog[i].Success == 0 {
-			c.prog[i].Success = last // ACCEPT
+		if c.prog[i].Success == acceptSentinel {
+			c.prog[i].Success = accept
+		} else if c.prog[i].Success == rejectSentinel {
+			c.prog[i].Success = reject
 		}
-		if c.prog[i].Failure == 0 {
-			c.prog[i].Failure = last + 1 // REJECT
+		if c.prog[i].Failure == acceptSentinel {
+			c.prog[i].Failure = accept
+		} else if c.prog[i].Failure == rejectSentinel {
+			c.prog[i].Failure = reject
 		}
 	}
 }
@@ -157,47 +197,60 @@ func opToTest(op string) uint8 {
 }
 
 func parseValue(raw, tok string, kind FieldKind) ([4]uint32, error) {
-	var val [4]uint32
+	var arg [4]uint32
 	switch tok {
 	case "number":
-		// raw may be "80" (decimal) or "0x06" (hex with prefix)
+		// raw may be "80" (decimal) or "0x06" (hex with 0x prefix).
 		s := strings.TrimPrefix(strings.TrimPrefix(raw, "0x"), "0X")
 		n, err := strconv.ParseUint(s, 16, 64)
 		if err != nil {
-			// Not hex — try decimal
+			// Not hex: try decimal
 			n, err = strconv.ParseUint(raw, 10, 64)
 			if err != nil {
-				return val, fmt.Errorf("invalid number %q", raw)
+				return arg, fmt.Errorf("invalid number %q", raw)
 			}
 		}
-		val[0] = uint32(n)
-		val[1] = uint32(n >> 32)
+		arg[0] = uint32(n)
+		arg[1] = uint32(n >> 32)
 	case "ipaddr":
 		ip := net.ParseIP(raw).To4()
 		if ip == nil {
-			return val, fmt.Errorf("invalid IPv4 %q", raw)
+			return arg, fmt.Errorf("invalid IPv4 %q", raw)
 		}
-		val[0] = binary.BigEndian.Uint32(ip)
+		arg[0] = binary.BigEndian.Uint32(ip)
 	case "ip6addr":
 		ip := net.ParseIP(raw).To16()
 		if ip == nil {
-			return val, fmt.Errorf("invalid IPv6 %q", raw)
+			return arg, fmt.Errorf("invalid IPv6 %q", raw)
 		}
-		val[0] = binary.BigEndian.Uint32(ip[0:4])
-		val[1] = binary.BigEndian.Uint32(ip[4:8])
-		val[2] = binary.BigEndian.Uint32(ip[8:12])
-		val[3] = binary.BigEndian.Uint32(ip[12:16])
+		arg[0] = binary.BigEndian.Uint32(ip[0:4])
+		arg[1] = binary.BigEndian.Uint32(ip[4:8])
+		arg[2] = binary.BigEndian.Uint32(ip[8:12])
+		arg[3] = binary.BigEndian.Uint32(ip[12:16])
 	}
-	return val, nil
+	return arg, nil
 }
 
-// Bytes serializes a filter program to bytes for DeviceIoControl.
+// Bytes serializes a filter program to the 24-byte-per-instruction wire format
+// expected by DeviceIoControl(IOCTL_WINDIVERT_STARTUP).
+//
+// Wire format (little-endian):
+//
+//	word0: field[10:0] | test[15:11] | success[31:16]
+//	word1: failure[15:0] | neg[16] | reserved[31:17]
+//	word2..5: arg[0..3]
 func Bytes(prog []FilterObject) []byte {
-	size := len(prog) * int(unsafe.Sizeof(FilterObject{}))
-	buf := make([]byte, size)
+	buf := make([]byte, len(prog)*24)
 	for i, obj := range prog {
-		off := i * int(unsafe.Sizeof(obj))
-		copy(buf[off:], (*[unsafe.Sizeof(FilterObject{})]byte)(unsafe.Pointer(&obj))[:])
+		off := i * 24
+		word0 := (obj.Field & 0x7FF) | (uint32(obj.Test)&0x1F)<<11 | uint32(obj.Success)<<16
+		word1 := uint32(obj.Failure) | uint32(obj.Neg&1)<<16
+		binary.LittleEndian.PutUint32(buf[off:], word0)
+		binary.LittleEndian.PutUint32(buf[off+4:], word1)
+		binary.LittleEndian.PutUint32(buf[off+8:], obj.Arg[0])
+		binary.LittleEndian.PutUint32(buf[off+12:], obj.Arg[1])
+		binary.LittleEndian.PutUint32(buf[off+16:], obj.Arg[2])
+		binary.LittleEndian.PutUint32(buf[off+20:], obj.Arg[3])
 	}
 	return buf
 }

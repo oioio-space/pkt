@@ -30,9 +30,11 @@ const (
 const (
 	ioctlInitialize uint32 = 0x921 // METHOD_OUT_DIRECT, FILE_READ_DATA|FILE_WRITE_DATA
 	ioctlStartup    uint32 = 0x922 // METHOD_IN_DIRECT,  FILE_READ_DATA|FILE_WRITE_DATA
-	ioctlShutdown   uint32 = 0x927 // METHOD_IN_DIRECT,  FILE_READ_DATA|FILE_WRITE_DATA
+	ioctlRecv       uint32 = 0x923 // METHOD_OUT_DIRECT, FILE_READ_DATA
+	ioctlSend       uint32 = 0x924 // METHOD_IN_DIRECT,  FILE_READ_DATA|FILE_WRITE_DATA
 	ioctlSetParam   uint32 = 0x925 // METHOD_IN_DIRECT,  FILE_READ_DATA|FILE_WRITE_DATA
 	ioctlGetParam   uint32 = 0x926 // METHOD_OUT_DIRECT, FILE_READ_DATA
+	ioctlShutdown   uint32 = 0x927 // METHOD_IN_DIRECT,  FILE_READ_DATA|FILE_WRITE_DATA
 )
 
 // ctlCode calcule un code IOCTL Windows complet.
@@ -54,10 +56,16 @@ const (
 var (
 	ioctlCodeInitialize = ctlCode(fileDeviceNetwork, ioctlInitialize, methodOutDirect, fileReadData|fileWriteData)
 	ioctlCodeStartup    = ctlCode(fileDeviceNetwork, ioctlStartup, methodInDirect, fileReadData|fileWriteData)
+	ioctlCodeRecv       = ctlCode(fileDeviceNetwork, ioctlRecv, methodOutDirect, fileReadData)
+	ioctlCodeSend       = ctlCode(fileDeviceNetwork, ioctlSend, methodInDirect, fileReadData|fileWriteData)
 	ioctlCodeShutdown   = ctlCode(fileDeviceNetwork, ioctlShutdown, methodInDirect, fileReadData|fileWriteData)
 	ioctlCodeSetParam   = ctlCode(fileDeviceNetwork, ioctlSetParam, methodInDirect, fileReadData|fileWriteData)
 	ioctlCodeGetParam   = ctlCode(fileDeviceNetwork, ioctlGetParam, methodOutDirect, fileReadData)
 )
+
+// priorityMax is the offset added to priority before passing to the driver.
+// IOCTL priority = (int32(priority) + priorityMax), so range [0, 60000].
+const priorityMax = int32(30000)
 
 // Device path WinDivert 2.x.
 const devicePath = `\.\WinDivert`
