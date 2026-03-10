@@ -4,11 +4,13 @@ package windivert
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
 	"pkt/windivert/filter"
 )
 
@@ -38,7 +40,7 @@ func (h *Handle) Shutdown() error {
 // Close shuts down and closes the WinDivert handle.
 func (h *Handle) Close() error {
 	h.Shutdown() // best-effort: unblocks any pending Recv
-	windows.CloseHandle(h.event)
+	_ = windows.CloseHandle(h.event)
 	return windows.CloseHandle(h.win)
 }
 
@@ -66,14 +68,14 @@ func (h *Handle) Recv(buf []byte) (int, *Address, time.Time, error) {
 		&buf[0], uint32(len(buf)),
 		&returned, &h.ov,
 	)
-	if err == windows.ERROR_IO_PENDING {
+	if errors.Is(err, windows.ERROR_IO_PENDING) {
 		if _, err = windows.WaitForSingleObject(h.event, windows.INFINITE); err != nil {
 			return 0, nil, time.Time{}, fmt.Errorf("WaitForSingleObject: %w", err)
 		}
 		err = windows.GetOverlappedResult(h.win, &h.ov, &returned, false)
 	}
 	if err != nil {
-		return 0, nil, time.Time{}, fmt.Errorf("Recv: %w", err)
+		return 0, nil, time.Time{}, fmt.Errorf("recv: %w", err)
 	}
 
 	ts := time.Now()
