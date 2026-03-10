@@ -40,7 +40,7 @@ func (h *Handle) Shutdown() error {
 
 // Close shuts down and closes the WinDivert handle.
 func (h *Handle) Close() error {
-	h.Shutdown() // best-effort: unblocks any pending Recv
+	_ = h.Shutdown() // best-effort: unblocks any pending Recv
 	_ = windows.CloseHandle(h.event)
 	return windows.CloseHandle(h.win)
 }
