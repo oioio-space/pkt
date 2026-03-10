@@ -3,6 +3,7 @@ go 1.26
 use (
 	./afpacket
 	./bpf
+	./capture
 	./examples
 	./windivert
 )

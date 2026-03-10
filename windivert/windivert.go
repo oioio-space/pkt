@@ -73,6 +73,13 @@ func Open(filterStr string, layer Layer, opts ...Option) (*Handle, error) {
 	return h, nil
 }
 
+// OpenSniff ouvre un handle WinDivert en mode sniff passif (FlagSniff).
+// Les paquets ne sont pas interceptés — ils continuent de circuler normalement.
+func OpenSniff(filterStr string, layer Layer, opts ...Option) (*Handle, error) {
+	opts = append([]Option{WithFlags(FlagSniff)}, opts...)
+	return Open(filterStr, layer, opts...)
+}
+
 // InstallDriver installs the WinDivert driver via SCM with the given options.
 // Without options: temporary behavior (compatible with Open).
 // With driver.WithPersistent(): permanent installation (survives reboots).
