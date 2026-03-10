@@ -1,0 +1,19 @@
+//go:build windows
+
+package main
+
+import (
+	"github.com/google/gopacket"
+	"pkt/windivert"
+)
+
+func newSource(_ string, filterExpr string) (gopacket.PacketDataSource, gopacket.Decoder, error) {
+	if filterExpr == "" {
+		filterExpr = "true"
+	}
+	h, err := windivert.Open(filterExpr, windivert.LayerNetwork, windivert.WithFlags(windivert.FlagSniff))
+	if err != nil {
+		return nil, nil, err
+	}
+	return h, h.LinkType(), nil
+}
