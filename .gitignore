@@ -11,5 +11,10 @@ go.work.sum
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+.beads/
 .idea/
 .claude/settings.local.json
+
+# Internal docs / dev tooling (not part of public repo)
+docs/
+AGENTS.md
