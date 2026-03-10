@@ -24,3 +24,6 @@ func newSource(iface string, filterExpr string) (gopacket.PacketDataSource, gopa
 	}
 	return h, layers.LayerTypeEthernet, nil
 }
+
+// installHook est un no-op sur Linux (installation persistante = Windows uniquement).
+func installHook() {}

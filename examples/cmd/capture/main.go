@@ -23,6 +23,8 @@ func main() {
 	outFile := flag.String("w", "", "fichier pcap de sortie (ex: out.pcap)")
 	flag.Parse()
 
+	installHook() // Windows: gère -install-persistent; no-op sur Linux
+
 	src, decoder, err := newSource(*iface, *filter)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
