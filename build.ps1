@@ -1,4 +1,4 @@
-# build.ps1 — Build pkt for Linux and/or Windows
+# build.ps1 — Build pkt examples for Linux and/or Windows
 # Usage: .\build.ps1 [-Target linux|windows|all] [-Clean]
 param(
     [ValidateSet("linux","windows","all")]
@@ -7,8 +7,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$dist  = Join-Path $PSScriptRoot "dist"
-$capkg = "./capture"
+$dist = Join-Path $PSScriptRoot "dist"
 
 if ($Clean) {
     Remove-Item -Recurse -Force $dist -ErrorAction SilentlyContinue
@@ -22,19 +21,30 @@ $env:CGO_ENABLED = "0"
 $env:GOARCH      = "amd64"
 
 function Build-Linux {
-    $out = Join-Path $dist "pkt-linux-amd64"
     $env:GOOS = "linux"
-    Write-Host "Building Linux..."
-    go build -trimpath -o $out $capkg
+    $out = Join-Path $dist "capture-linux-amd64"
+    Write-Host "Building Linux capture..."
+    go build -trimpath -o $out ./examples/cmd/capture/
     Write-Host "Built: $out"
 }
 
 function Build-Windows {
-    $out = Join-Path $dist "pkt-windows-amd64.exe"
     $env:GOOS = "windows"
-    Write-Host "Building Windows..."
-    go build -trimpath -o $out $capkg
-    Write-Host "Built: $out"
+
+    $outCapture = Join-Path $dist "capture-windows-amd64.exe"
+    Write-Host "Building Windows capture..."
+    go build -trimpath -o $outCapture ./examples/cmd/capture/
+    Write-Host "Built: $outCapture"
+
+    $outModify = Join-Path $dist "modify-payload-windows-amd64.exe"
+    Write-Host "Building Windows modify-payload..."
+    go build -trimpath -o $outModify ./examples/cmd/modify-payload/
+    Write-Host "Built: $outModify"
+
+    $outDrop = Join-Path $dist "drop-windows-amd64.exe"
+    Write-Host "Building Windows drop..."
+    go build -trimpath -o $outDrop ./examples/cmd/drop/
+    Write-Host "Built: $outDrop"
 }
 
 switch ($Target) {
