@@ -24,6 +24,7 @@ type Handle struct {
 	fd      int
 	ifindex int
 	opts    Options
+	recvBuf []byte
 }
 
 func Open(iface string, opts ...Option) (*Handle, error) {

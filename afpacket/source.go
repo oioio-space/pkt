@@ -12,9 +12,8 @@ import (
 )
 
 func readPacket(h *Handle) ([]byte, gopacket.CaptureInfo, error) {
-	buf := make([]byte, h.opts.SnapLen)
 	oob := make([]byte, 64)
-	n, oobn, _, _, err := unix.Recvmsg(h.fd, buf, oob, 0)
+	n, oobn, _, _, err := unix.Recvmsg(h.fd, h.recvBuf, oob, 0)
 	if err != nil {
 		return nil, gopacket.CaptureInfo{}, err
 	}
@@ -31,7 +30,9 @@ func readPacket(h *Handle) ([]byte, gopacket.CaptureInfo, error) {
 		}
 	}
 
-	return buf[:n], gopacket.CaptureInfo{
+	pktCopy := make([]byte, n)
+	copy(pktCopy, h.recvBuf[:n])
+	return pktCopy, gopacket.CaptureInfo{
 		Timestamp:     ts,
 		CaptureLength: n,
 		Length:        n,

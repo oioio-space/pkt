@@ -33,7 +33,7 @@ func open(iface string, o Options) (*Handle, error) {
 		return nil, fmt.Errorf("bind: %w", err)
 	}
 
-	h := &Handle{fd: fd, ifindex: ifi.Index, opts: o}
+	h := &Handle{fd: fd, ifindex: ifi.Index, opts: o, recvBuf: make([]byte, o.SnapLen)}
 
 	if err := unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_TIMESTAMP, 1); err != nil {
 		unix.Close(fd)
