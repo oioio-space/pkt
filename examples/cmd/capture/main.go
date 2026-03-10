@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -54,8 +55,10 @@ func main() {
 			os.Exit(1)
 		}
 		defer f.Close()
+		bw := bufio.NewWriterSize(f, 1<<20) // 1 MiB write buffer
+		defer bw.Flush()
 		lt := layerTypeToLinkType(decoder)
-		pcapWriter = pcapgo.NewWriter(f)
+		pcapWriter = pcapgo.NewWriter(bw)
 		if err := pcapWriter.WriteFileHeader(65535, lt); err != nil {
 			fmt.Fprintln(os.Stderr, "pcap header:", err)
 			os.Exit(1)
