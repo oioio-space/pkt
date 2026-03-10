@@ -45,6 +45,11 @@ function Build-Windows {
     Write-Host "Building Windows drop..."
     go build -trimpath -o $outDrop ./examples/cmd/drop/
     Write-Host "Built: $outDrop"
+
+    $outFilter = Join-Path $dist "filter-windows-amd64.exe"
+    Write-Host "Building Windows filter..."
+    go build -trimpath -o $outFilter ./examples/cmd/filter/
+    Write-Host "Built: $outFilter"
 }
 
 switch ($Target) {

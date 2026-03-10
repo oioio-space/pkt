@@ -10,6 +10,7 @@ LINUX_CAPTURE   := $(DIST)/capture-linux-amd64
 WINDOWS_CAPTURE := $(DIST)/capture-windows-amd64.exe
 WINDOWS_MODIFY  := $(DIST)/modify-payload-windows-amd64.exe
 WINDOWS_DROP    := $(DIST)/drop-windows-amd64.exe
+WINDOWS_FILTER  := $(DIST)/filter-windows-amd64.exe
 
 export CGO_ENABLED = 0
 export GOARCH      = amd64
@@ -38,7 +39,8 @@ windows: $(DIST)
 	GOOS=windows go build -trimpath -o $(WINDOWS_CAPTURE) ./examples/cmd/capture/
 	GOOS=windows go build -trimpath -o $(WINDOWS_MODIFY)  ./examples/cmd/modify-payload/
 	GOOS=windows go build -trimpath -o $(WINDOWS_DROP)    ./examples/cmd/drop/
-	@$(ECHO) Built: $(WINDOWS_CAPTURE) $(WINDOWS_MODIFY) $(WINDOWS_DROP)
+	GOOS=windows go build -trimpath -o $(WINDOWS_FILTER)  ./examples/cmd/filter/
+	@$(ECHO) Built: $(WINDOWS_CAPTURE) $(WINDOWS_MODIFY) $(WINDOWS_DROP) $(WINDOWS_FILTER)
 
 $(DIST):
 	$(MKDIR)
@@ -47,6 +49,7 @@ $(DIST):
 test:
 	GOOS=windows go test ./windivert/filter/... -v
 	GOOS=linux   go test ./bpf/...             -v
+	GOOS=linux   go test ./afpacket/...        -v
 
 ## Grant CAP_NET_RAW to the Linux binary (Linux, requires root/sudo).
 ## Once set, the binary captures packets without running as root.
