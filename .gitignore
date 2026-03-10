@@ -2,8 +2,8 @@
 # Build artifacts
 dist/
 *.exe
-capture
-filter
+/capture
+/filter
 
 # Go workspace temp files
 go.work.sum

@@ -1,15 +1,16 @@
-# build.ps1 — Build pkt examples for Linux and/or Windows
-# Usage: .\build.ps1 [-Target linux|windows|all] [-Clean]
+# build.ps1 — Build, test and vet pkt (Windows)
+# Usage: .\build.ps1 [-Target linux|windows|all|test|check|clean]
 param(
-    [ValidateSet("linux","windows","all")]
+    [ValidateSet("linux","windows","all","test","check","clean")]
     [string]$Target = "all",
     [switch]$Clean
 )
 
 $ErrorActionPreference = "Stop"
-$dist = Join-Path $PSScriptRoot "dist"
+$root = $PSScriptRoot
+$dist = Join-Path $root "dist"
 
-if ($Clean) {
+if ($Clean -or $Target -eq "clean") {
     Remove-Item -Recurse -Force $dist -ErrorAction SilentlyContinue
     Write-Host "Cleaned dist/"
     exit 0
@@ -24,36 +25,54 @@ function Build-Linux {
     $env:GOOS = "linux"
     $out = Join-Path $dist "capture-linux-amd64"
     Write-Host "Building Linux capture..."
-    go build -trimpath -o $out ./examples/cmd/capture/
+    & go build -trimpath -o $out ./examples/cmd/capture/
     Write-Host "Built: $out"
 }
 
 function Build-Windows {
     $env:GOOS = "windows"
 
-    $outCapture = Join-Path $dist "capture-windows-amd64.exe"
-    Write-Host "Building Windows capture..."
-    go build -trimpath -o $outCapture ./examples/cmd/capture/
-    Write-Host "Built: $outCapture"
+    $bins = @{
+        "capture-windows-amd64.exe"       = "./examples/cmd/capture/"
+        "modify-payload-windows-amd64.exe" = "./examples/cmd/modify-payload/"
+        "drop-windows-amd64.exe"           = "./examples/cmd/drop/"
+        "filter-windows-amd64.exe"         = "./examples/cmd/filter/"
+    }
 
-    $outModify = Join-Path $dist "modify-payload-windows-amd64.exe"
-    Write-Host "Building Windows modify-payload..."
-    go build -trimpath -o $outModify ./examples/cmd/modify-payload/
-    Write-Host "Built: $outModify"
+    foreach ($name in $bins.Keys) {
+        Write-Host "Building $name..."
+        $out = Join-Path $dist $name
+        & go build -trimpath -o $out $bins[$name]
+        Write-Host "Built: $out"
+    }
+}
 
-    $outDrop = Join-Path $dist "drop-windows-amd64.exe"
-    Write-Host "Building Windows drop..."
-    go build -trimpath -o $outDrop ./examples/cmd/drop/
-    Write-Host "Built: $outDrop"
+function Run-Tests {
+    Write-Host "Running Windows tests..."
+    $env:GOOS = "windows"
+    & go test ./windivert/filter/... -v
+    Write-Host "Running Linux tests (cross-compiled)..."
+    $env:GOOS = "linux"
+    & go test ./bpf/...      -v
+    & go test ./afpacket/... -v
+}
 
-    $outFilter = Join-Path $dist "filter-windows-amd64.exe"
-    Write-Host "Building Windows filter..."
-    go build -trimpath -o $outFilter ./examples/cmd/filter/
-    Write-Host "Built: $outFilter"
+function Run-Check {
+    Build-Linux
+    Build-Windows
+    Write-Host "Vetting Windows packages..."
+    $env:GOOS = "windows"
+    & go vet ./windivert/... ./capture/... ./examples/...
+    Write-Host "Vetting Linux packages..."
+    $env:GOOS = "linux"
+    & go vet ./bpf/... ./afpacket/... ./capture/...
+    Write-Host "All checks passed."
 }
 
 switch ($Target) {
     "linux"   { Build-Linux }
     "windows" { Build-Windows }
     "all"     { Build-Linux; Build-Windows }
+    "test"    { Run-Tests }
+    "check"   { Run-Check }
 }

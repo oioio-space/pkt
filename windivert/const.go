@@ -86,3 +86,6 @@ const (
 	PriorityLowest  int16 = -30000
 	PriorityDefault int16 = 0
 )
+
+// DriverVersion is the version of the WinDivert64.sys driver embedded in this package.
+const DriverVersion = "2.2.2"

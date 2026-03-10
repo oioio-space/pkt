@@ -18,7 +18,7 @@ import (
 
 func main() {
 	filterExpr := flag.String("f", "", "filtre WinDivert (ex: \"tcp.DstPort == 443\")")
-	mode       := flag.String("mode", "blacklist", "mode: blacklist (droppe ce qui matche) ou whitelist (laisse passer ce qui matche)")
+	mode       := flag.String("mode", "blacklist", "blacklist: droppe ce qui matche | whitelist: laisse passer ce qui matche")
 	verbose    := flag.Bool("v", false, "affiche les détails de chaque paquet droppé")
 	flag.Parse()
 
@@ -49,27 +49,21 @@ func main() {
 	defer stop()
 	go func() { <-ctx.Done(); h.Shutdown() }()
 
-	buf := make([]byte, 65535)
+	ps := gopacket.NewPacketSource(h, h.LinkType())
 	dropped := 0
 
 	log.Printf("filtre actif [%s] (filtre WinDivert: %q) — Ctrl+C pour arrêter",
 		*mode, effectiveFilter)
 
-	for {
-		n, _, _, err := h.Recv(buf)
-		if err != nil {
-			break
-		}
+	for pkt := range ps.Packets() {
 		dropped++
-
 		if *verbose {
-			pkt := gopacket.NewPacket(buf[:n], layers.LayerTypeIPv4, gopacket.Default)
 			if ipLayer := pkt.Layer(layers.LayerTypeIPv4); ipLayer != nil {
 				ip := ipLayer.(*layers.IPv4)
 				log.Printf("drop #%d : %v → %v proto=%v size=%d",
-					dropped, ip.SrcIP, ip.DstIP, ip.Protocol, n)
+					dropped, ip.SrcIP, ip.DstIP, ip.Protocol, len(pkt.Data()))
 			} else {
-				log.Printf("drop #%d : %d bytes", dropped, n)
+				log.Printf("drop #%d : %d bytes", dropped, len(pkt.Data()))
 			}
 		}
 		// Ne pas appeler h.Send → le noyau supprime le paquet
