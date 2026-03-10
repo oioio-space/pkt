@@ -1,6 +1,6 @@
 //go:build windows
 
-// Package driver installs and manages the WinDivert kernel driver via SCM.
+// Package driver installe et gère le driver kernel WinDivert via SCM.
 package driver
 
 import (
@@ -14,17 +14,69 @@ import (
 
 const serviceName = "WinDivert"
 
-// Install extracts the .sys binary and installs the WinDivert driver via SCM.
-// Idempotent — returns nil if the driver is already running.
-func Install(sysData []byte) error {
-	sysPath, err := extractSys(sysData)
+// installConfig regroupe les options d'installation.
+type installConfig struct {
+	persistent bool   // true = SERVICE_AUTO_START + chemin stable + pas de Delete
+	aclSDDL    string // SDDL DACL à appliquer sur le device après démarrage (vide = inchangé)
+}
+
+// InstallOption configure l'installation du driver.
+type InstallOption func(*installConfig)
+
+// WithPersistent installe le driver de façon permanente :
+//   - Chemin stable : %SystemRoot%\System32\drivers\WinDivert64.sys
+//   - StartType SERVICE_AUTO_START (démarre au boot)
+//   - Le service n'est PAS marqué pour suppression automatique
+//
+// Sans cette option (défaut) : comportement temporaire identique à la DLL officielle
+// (temp dir, StartManual, Delete immédiat après démarrage).
+func WithPersistent() InstallOption {
+	return func(c *installConfig) { c.persistent = true }
+}
+
+// WithACL applique un DACL personnalisé sur l'objet device WinDivert après démarrage.
+// sddl est une chaîne SDDL décrivant le DACL, ex : "D:(A;;GA;;;AU)" pour
+// autoriser Authenticated Users à ouvrir le device sans droits admin.
+//
+// Cette opération nécessite des privilèges admin lors de son application initiale.
+// Une fois le DACL positionné, les processus non-admin peuvent ouvrir le device.
+func WithACL(sddl string) InstallOption {
+	return func(c *installConfig) { c.aclSDDL = sddl }
+}
+
+// WithUserAccess est un raccourci pour WithACL qui autorise tous les utilisateurs
+// authentifiés (Authenticated Users, SID AU) à utiliser le driver WinDivert
+// sans droits administrateur.
+func WithUserAccess() InstallOption {
+	return WithACL("D:(A;;GA;;;AU)")
+}
+
+// Install extrait le binaire .sys et installe le driver WinDivert via SCM.
+// Sans options : comportement inchangé (temporaire, compatible avec l'existant).
+func Install(sysData []byte, opts ...InstallOption) error {
+	cfg := &installConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	sysPath, err := extractSys(sysData, cfg.persistent)
 	if err != nil {
 		return fmt.Errorf("extract sys: %w", err)
 	}
-	return installService(sysPath)
+
+	if err := installService(sysPath, cfg); err != nil {
+		return err
+	}
+
+	if cfg.aclSDDL != "" {
+		if err := applyDeviceACL(cfg.aclSDDL); err != nil {
+			return fmt.Errorf("apply ACL: %w", err)
+		}
+	}
+	return nil
 }
 
-// Uninstall stops and removes the WinDivert SCM service.
+// Uninstall arrête et supprime le service SCM WinDivert.
 func Uninstall() error {
 	m, err := mgr.Connect()
 	if err != nil {
@@ -34,14 +86,14 @@ func Uninstall() error {
 
 	s, err := m.OpenService(serviceName)
 	if err != nil {
-		return nil // not installed
+		return nil // non installé
 	}
 	defer s.Close()
 	_, _ = s.Control(windows.SERVICE_CONTROL_STOP)
 	return s.Delete()
 }
 
-// OpenDevice opens the WinDivert device and returns an overlapped-capable Windows handle.
+// OpenDevice ouvre le device WinDivert et retourne un handle Windows compatible overlapped.
 func OpenDevice() (windows.Handle, error) {
 	name, err := windows.UTF16PtrFromString(`\\.\WinDivert`)
 	if err != nil {
@@ -57,7 +109,13 @@ func OpenDevice() (windows.Handle, error) {
 	)
 }
 
-func extractSys(data []byte) (string, error) {
+// extractSys écrit le binaire .sys dans un chemin approprié.
+// persistent=true → chemin stable dans %SystemRoot%\System32\drivers\.
+// persistent=false → répertoire temporaire (comportement existant).
+func extractSys(data []byte, persistent bool) (string, error) {
+	if persistent {
+		return extractSysStable(data)
+	}
 	dir, err := os.MkdirTemp("", "windivert-")
 	if err != nil {
 		return "", err
@@ -66,7 +124,22 @@ func extractSys(data []byte) (string, error) {
 	return path, os.WriteFile(path, data, 0600)
 }
 
-func installService(sysPath string) error {
+// extractSysStable écrit WinDivert64.sys dans %SystemRoot%\System32\drivers\.
+// Si le fichier existe déjà (installation précédente), il est réutilisé tel quel.
+func extractSysStable(data []byte) (string, error) {
+	sysRoot := os.Getenv("SystemRoot")
+	if sysRoot == "" {
+		sysRoot = `C:\Windows`
+	}
+	path := filepath.Join(sysRoot, "System32", "drivers", "WinDivert64.sys")
+	// Si déjà présent, ne pas écraser (le driver pourrait être en cours d'utilisation).
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	}
+	return path, os.WriteFile(path, data, 0600)
+}
+
+func installService(sysPath string, cfg *installConfig) error {
 	m, err := mgr.Connect()
 	if err != nil {
 		return fmt.Errorf("SCM connect: %w", err)
@@ -79,9 +152,14 @@ func installService(sysPath string) error {
 		return startIfStopped(s)
 	}
 
+	startType := uint32(mgr.StartManual)
+	if cfg.persistent {
+		startType = uint32(mgr.StartAutomatic)
+	}
+
 	s, err = m.CreateService(serviceName, sysPath, mgr.Config{
 		ServiceType:  windows.SERVICE_KERNEL_DRIVER,
-		StartType:    mgr.StartManual,
+		StartType:    startType,
 		ErrorControl: mgr.ErrorNormal,
 		DisplayName:  "WinDivert Network Driver",
 	})
@@ -89,13 +167,16 @@ func installService(sysPath string) error {
 		return fmt.Errorf("CreateService: %w", err)
 	}
 	defer s.Close()
+
 	if err := s.Start(); err != nil {
 		return err
 	}
-	// Mirror the official WinDivert DLL: mark for deletion immediately after starting.
-	// The SCM removes the service automatically once all handles are closed and the
-	// driver stops — no manual cleanup needed.
-	_ = s.Delete()
+
+	if !cfg.persistent {
+		// Comportement temporaire : marquer pour suppression automatique
+		// quand le dernier handle WinDivert est fermé (comme la DLL officielle).
+		_ = s.Delete()
+	}
 	return nil
 }
 
@@ -108,4 +189,30 @@ func startIfStopped(s *mgr.Service) error {
 		return nil
 	}
 	return s.Start()
+}
+
+// applyDeviceACL applique un DACL SDDL sur l'objet kernel device WinDivert.
+// Nécessite des privilèges admin.
+func applyDeviceACL(sddl string) error {
+	sd, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
+		return fmt.Errorf("parse SDDL %q: %w", sddl, err)
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return fmt.Errorf("extract DACL: %w", err)
+	}
+
+	h, err := OpenDevice()
+	if err != nil {
+		return fmt.Errorf("open device: %w", err)
+	}
+	defer windows.CloseHandle(h)
+
+	return windows.SetSecurityInfo(
+		h,
+		windows.SE_KERNEL_OBJECT,
+		windows.DACL_SECURITY_INFORMATION,
+		nil, nil, dacl, nil,
+	)
 }
