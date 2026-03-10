@@ -1,0 +1,8 @@
+go 1.26.1
+
+use (
+	./afpacket
+	./bpf
+	./capture
+	./windivert
+)

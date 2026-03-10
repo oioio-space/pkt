@@ -1,0 +1,141 @@
+{
+// Code block - inclus en tete du fichier genere.
+package filter
+
+// Node est le type de base de l'AST.
+type Node interface {
+	nodeKind() string
+}
+
+// BoolNode represente true ou false.
+type BoolNode struct{ Value bool }
+
+// FieldNode represente un champ seul (ex: ip, tcp) - test d'existence.
+type FieldNode struct{ Parts []string }
+
+// CmpNode represente une comparaison champ op valeur.
+type CmpNode struct {
+	Field []string
+	Op    string // "==", "!=", "<", "<=", ">", ">="
+	Value string // valeur brute
+	VTok  string // "number" ou "ipaddr"
+}
+
+// BinaryNode represente AND ou OR.
+type BinaryNode struct {
+	Op          string // "and" ou "or"
+	Left, Right Node
+}
+
+// UnaryNode represente NOT.
+type UnaryNode struct{ Child Node }
+
+func (n *BoolNode) nodeKind() string   { return "bool" }
+func (n *FieldNode) nodeKind() string  { return "field" }
+func (n *CmpNode) nodeKind() string    { return "cmp" }
+func (n *BinaryNode) nodeKind() string { return "binary" }
+func (n *UnaryNode) nodeKind() string  { return "unary" }
+
+// toIfaceSlice convertit interface{} en []interface{} (helper pour les repetitions pigeon).
+func toIfaceSlice(v interface{}) []interface{} {
+	if v == nil {
+		return nil
+	}
+	return v.([]interface{})
+}
+}
+
+// Input est le point d'entree du parser.
+Input <- _ e:OrExpr _ EOF {
+	return e, nil
+}
+
+// OrExpr - OR a la priorite la plus basse.
+OrExpr <- l:AndExpr rest:(_ ("or" / "||") _ r:AndExpr { return r, nil })* {
+	node := l.(Node)
+	for _, r := range toIfaceSlice(rest) {
+		node = &BinaryNode{"or", node, r.(Node)}
+	}
+	return node, nil
+}
+
+// AndExpr - AND priorite intermediaire.
+AndExpr <- l:NotExpr rest:(_ ("and" / "&&") _ r:NotExpr { return r, nil })* {
+	node := l.(Node)
+	for _, r := range toIfaceSlice(rest) {
+		node = &BinaryNode{"and", node, r.(Node)}
+	}
+	return node, nil
+}
+
+// NotExpr - NOT priorite haute (unaire).
+NotExpr <- ("!" / ("not" !IdentChar _)) e:NotExpr {
+	return &UnaryNode{e.(Node)}, nil
+} / Primary
+
+// Primary - parentheses, litteraux, ou champ.
+Primary <- "(" _ e:OrExpr _ ")" {
+	return e, nil
+} / "true" !IdentChar {
+	return &BoolNode{true}, nil
+} / "false" !IdentChar {
+	return &BoolNode{false}, nil
+} / FieldCmp
+
+// FieldCmp - comparaison ou existence d'un champ.
+FieldCmp <- f:Field _ op:CompOp _ v:Value {
+	field := f.(*FieldNode)
+	pair := v.([]string)
+	return &CmpNode{field.Parts, op.(string), pair[0], pair[1]}, nil
+} / g:Field {
+	return g, nil
+}
+
+// Field - chemin de champ: "ip", "tcp.DstPort", "ip.SrcAddr".
+Field <- head:Ident tail:('.' t:Ident { return t, nil })* {
+	parts := []string{head.(string)}
+	for _, t := range toIfaceSlice(tail) {
+		parts = append(parts, t.(string))
+	}
+	return &FieldNode{parts}, nil
+}
+
+// CompOp - operateurs de comparaison (ordre important: >= avant >).
+CompOp <- ">=" { return ">=", nil }
+        / "<=" { return "<=", nil }
+        / "!=" { return "!=", nil }
+        / "==" { return "==", nil }
+        / "<"  { return "<",  nil }
+        / ">"  { return ">",  nil }
+
+// Value - valeur a droite d'un operateur.
+Value <- IPv4Addr / HexNum / DecNum
+
+// IPv4Addr - adresse IPv4 (4 octets separes par des points).
+IPv4Addr <- [0-9]+ '.' [0-9]+ '.' [0-9]+ '.' [0-9]+ {
+	return []string{string(c.text), "ipaddr"}, nil
+}
+
+// HexNum - entier hexadecimal (0x...).
+HexNum <- ("0x" / "0X") [0-9a-fA-F]+ {
+	return []string{string(c.text), "number"}, nil
+}
+
+// DecNum - entier decimal.
+DecNum <- [0-9]+ {
+	return []string{string(c.text), "number"}, nil
+}
+
+// Ident - identifiant Go-style.
+Ident <- [a-zA-Z_] [a-zA-Z0-9_]* {
+	return string(c.text), nil
+}
+
+// IdentChar - caractere d'identifiant (lookahead uniquement).
+IdentChar <- [a-zA-Z0-9_]
+
+// _ - espace blanc optionnel.
+_ "whitespace" <- [ \t\n\r]*
+
+// EOF - fin d'entree.
+EOF <- !.
