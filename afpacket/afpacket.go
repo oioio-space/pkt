@@ -21,8 +21,9 @@ func WithPromiscuous(b bool) Option { return func(o *Options) { o.Promiscuous = 
 func WithFilter(expr string) Option { return func(o *Options) { o.Filter = expr } }
 
 type Handle struct {
-	fd   int
-	opts Options
+	fd      int
+	ifindex int
+	opts    Options
 }
 
 func Open(iface string, opts ...Option) (*Handle, error) {

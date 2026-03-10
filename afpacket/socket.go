@@ -33,7 +33,7 @@ func open(iface string, o Options) (*Handle, error) {
 		return nil, fmt.Errorf("bind: %w", err)
 	}
 
-	h := &Handle{fd: fd, opts: o}
+	h := &Handle{fd: fd, ifindex: ifi.Index, opts: o}
 
 	if o.Promiscuous {
 		if err := setPromiscuous(fd, ifi.Index, true); err != nil {

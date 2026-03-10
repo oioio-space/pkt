@@ -66,7 +66,7 @@ func main() {
 
 			sbuf := gopacket.NewSerializeBuffer()
 			opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
-			if err := gopacket.SerializeLayers(sbuf, opts, ip, tcp); err != nil {
+			if err := gopacket.SerializeLayers(sbuf, opts, ip, tcp, gopacket.Payload(tcp.Payload)); err != nil {
 				log.Printf("serialize error: %v — forwarding original", err)
 			} else {
 				data = sbuf.Bytes()
