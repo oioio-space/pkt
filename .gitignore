@@ -1,7 +1,15 @@
 
+# Build artifacts
+dist/
+*.exe
+capture
+filter
+
+# Go workspace temp files
+go.work.sum
+
 # Dolt database files (added by bd init)
 .dolt/
 *.db
 .idea/
 .claude/settings.local.json
-dist/
