@@ -64,3 +64,15 @@ func Open(filterStr string, layer Layer, opts ...Option) (*Handle, error) {
 	}
 	return h, nil
 }
+
+// InstallDriver installs the WinDivert driver via SCM with the given options.
+// Without options: temporary behavior (compatible with Open).
+// With driver.WithPersistent(): permanent installation (survives reboots).
+// With driver.WithUserAccess() or driver.WithACL(sddl): allows access without admin rights.
+//
+// Example — permanent installation for all authenticated users:
+//
+//	err := windivert.InstallDriver(driver.WithPersistent(), driver.WithUserAccess())
+func InstallDriver(opts ...driver.InstallOption) error {
+	return driver.Install(assets.Sys64, opts...)
+}
