@@ -35,6 +35,11 @@ func open(iface string, o Options) (*Handle, error) {
 
 	h := &Handle{fd: fd, ifindex: ifi.Index, opts: o}
 
+	if err := unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_TIMESTAMP, 1); err != nil {
+		unix.Close(fd)
+		return nil, fmt.Errorf("SO_TIMESTAMP: %w", err)
+	}
+
 	if o.Promiscuous {
 		if err := setPromiscuous(fd, ifi.Index, true); err != nil {
 			unix.Close(fd)
