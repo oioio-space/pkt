@@ -17,6 +17,8 @@ type Handle struct {
 	win   windows.Handle
 	layer Layer
 	opts  options
+	event windows.Handle
+	ov    windows.Overlapped
 }
 
 // Shutdown signals the driver to stop delivering packets and unblocks any
@@ -36,6 +38,7 @@ func (h *Handle) Shutdown() error {
 // Close shuts down and closes the WinDivert handle.
 func (h *Handle) Close() error {
 	h.Shutdown() // best-effort: unblocks any pending Recv
+	windows.CloseHandle(h.event)
 	return windows.CloseHandle(h.win)
 }
 
@@ -55,25 +58,19 @@ func (h *Handle) Recv(buf []byte) (int, *Address, time.Time, error) {
 	binary.LittleEndian.PutUint64(ioRecv[8:], uint64(uintptr(unsafe.Pointer(&addrLen))))
 
 	var returned uint32
-	ov := new(windows.Overlapped)
-	ev, err := windows.CreateEvent(nil, 0, 0, nil)
-	if err != nil {
-		return 0, nil, time.Time{}, fmt.Errorf("CreateEvent: %w", err)
-	}
-	defer windows.CloseHandle(ev)
-	ov.HEvent = ev
+	h.ov = windows.Overlapped{HEvent: h.event} // reset + set event
 
-	err = windows.DeviceIoControl(
+	err := windows.DeviceIoControl(
 		h.win, ioctlCodeRecv,
 		&ioRecv[0], uint32(len(ioRecv)),
 		&buf[0], uint32(len(buf)),
-		&returned, ov,
+		&returned, &h.ov,
 	)
 	if err == windows.ERROR_IO_PENDING {
-		if _, err = windows.WaitForSingleObject(ev, windows.INFINITE); err != nil {
+		if _, err = windows.WaitForSingleObject(h.event, windows.INFINITE); err != nil {
 			return 0, nil, time.Time{}, fmt.Errorf("WaitForSingleObject: %w", err)
 		}
-		err = windows.GetOverlappedResult(h.win, ov, &returned, false)
+		err = windows.GetOverlappedResult(h.win, &h.ov, &returned, false)
 	}
 	if err != nil {
 		return 0, nil, time.Time{}, fmt.Errorf("Recv: %w", err)

@@ -5,6 +5,7 @@ package windivert
 import (
 	"fmt"
 
+	"golang.org/x/sys/windows"
 	"pkt/windivert/assets"
 	"pkt/windivert/driver"
 	"pkt/windivert/filter"
@@ -58,6 +59,12 @@ func Open(filterStr string, layer Layer, opts ...Option) (*Handle, error) {
 	}
 
 	h := &Handle{win: win, layer: layer, opts: o}
+	ev, err := windows.CreateEvent(nil, 0, 0, nil)
+	if err != nil {
+		_ = windows.CloseHandle(win)
+		return nil, fmt.Errorf("CreateEvent: %w", err)
+	}
+	h.event = ev
 	if err := h.initialize(prog, o.Priority, o.Flags); err != nil {
 		h.Close()
 		return nil, fmt.Errorf("initialize: %w", err)
