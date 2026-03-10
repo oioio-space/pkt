@@ -4,3 +4,4 @@
 *.db
 .idea/
 .claude/settings.local.json
+dist/

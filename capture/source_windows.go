@@ -11,7 +11,7 @@ func newSource(_ string, filterExpr string) (gopacket.PacketDataSource, gopacket
 	if filterExpr == "" {
 		filterExpr = "true" // capture all packets
 	}
-	h, err := windivert.Open(filterExpr, windivert.LayerNetwork)
+	h, err := windivert.Open(filterExpr, windivert.LayerNetwork, windivert.WithFlags(windivert.FlagSniff))
 	if err != nil {
 		return nil, nil, err
 	}

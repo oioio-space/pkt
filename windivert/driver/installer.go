@@ -89,7 +89,14 @@ func installService(sysPath string) error {
 		return fmt.Errorf("CreateService: %w", err)
 	}
 	defer s.Close()
-	return s.Start()
+	if err := s.Start(); err != nil {
+		return err
+	}
+	// Mirror the official WinDivert DLL: mark for deletion immediately after starting.
+	// The SCM removes the service automatically once all handles are closed and the
+	// driver stops — no manual cleanup needed.
+	_ = s.Delete()
+	return nil
 }
 
 func startIfStopped(s *mgr.Service) error {

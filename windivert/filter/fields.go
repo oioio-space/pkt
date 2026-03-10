@@ -22,54 +22,91 @@ const (
 
 // FieldDef définit un champ WinDivert connu.
 type FieldDef struct {
-	ID   uint32    // identifiant dans le bytecode
+	ID   uint32    // identifiant dans le bytecode (WINDIVERT_FILTER_FIELD_*)
 	Kind FieldKind
 }
 
-// fieldTable maps field path → FieldDef
+// fieldTable maps filter-language field path → FieldDef.
+// IDs are taken verbatim from windivert_device.h (WINDIVERT_FILTER_FIELD_*).
 var fieldTable = map[string]FieldDef{
-	"Zero": {0, KindUint8}, "Event": {1, KindUint8},
-	"Random8": {2, KindUint8}, "Random16": {3, KindUint16},
-	"Random32": {4, KindUint32}, "Timestamp": {5, KindUint64},
-	"Length": {6, KindUint16},
-	// IPv4
-	"ip":           {10, KindBool},
-	"ip.HdrLength": {11, KindUint8}, "ip.TOS": {12, KindUint8},
-	"ip.Length": {13, KindUint16}, "ip.Id": {14, KindUint16},
-	"ip.MF": {15, KindBool}, "ip.FragOff": {16, KindUint16},
-	"ip.TTL": {17, KindUint8}, "ip.Protocol": {18, KindUint8},
-	"ip.Checksum": {19, KindUint16},
-	"ip.SrcAddr":  {20, KindIPv4}, "ip.DstAddr": {21, KindIPv4},
-	// IPv6
-	"ipv6":              {30, KindBool},
-	"ipv6.TrafficClass": {31, KindUint8}, "ipv6.FlowLabel": {32, KindUint32},
-	"ipv6.Length": {33, KindUint16}, "ipv6.NextHdr": {34, KindUint8},
-	"ipv6.HopLimit": {35, KindUint8},
-	"ipv6.SrcAddr":  {36, KindIPv6}, "ipv6.DstAddr": {37, KindIPv6},
-	// TCP
-	"tcp":         {40, KindBool},
-	"tcp.SrcPort": {41, KindUint16}, "tcp.DstPort": {42, KindUint16},
-	"tcp.SeqNum": {43, KindUint32}, "tcp.AckNum": {44, KindUint32},
-	"tcp.HdrLength": {45, KindUint8},
-	"tcp.Ns":        {46, KindBool}, "tcp.Cwr": {47, KindBool},
-	"tcp.Ece": {48, KindBool}, "tcp.Urg": {49, KindBool},
-	"tcp.Ack": {50, KindBool}, "tcp.Psh": {51, KindBool},
-	"tcp.Rst": {52, KindBool}, "tcp.Syn": {53, KindBool},
-	"tcp.Fin": {54, KindBool}, "tcp.Window": {55, KindUint16},
-	"tcp.Checksum":      {56, KindUint16}, "tcp.UrgPtr": {57, KindUint16},
-	"tcp.PayloadLength": {58, KindUint16},
-	// UDP
-	"udp":         {60, KindBool},
-	"udp.SrcPort": {61, KindUint16}, "udp.DstPort": {62, KindUint16},
-	"udp.Length":        {63, KindUint16}, "udp.Checksum": {64, KindUint16},
-	"udp.PayloadLength": {65, KindUint16},
-	// ICMP / ICMPv6
-	"icmp":          {70, KindBool},
-	"icmp.Type":     {71, KindUint8}, "icmp.Code": {72, KindUint8},
-	"icmp.Checksum": {73, KindUint16}, "icmp.Body": {74, KindUint32},
-	"icmpv6":          {80, KindBool},
-	"icmpv6.Type":     {81, KindUint8}, "icmpv6.Code": {82, KindUint8},
-	"icmpv6.Checksum": {83, KindUint16}, "icmpv6.Body": {84, KindUint32},
+	// Meta / always-constant
+	"Zero": {0, KindUint8},
+	// Direction (network / network-forward layers)
+	"inbound":  {1, KindBool},
+	"outbound": {2, KindBool},
+	// Interface
+	"ifIdx":    {3, KindUint32},
+	"subIfIdx": {4, KindUint32},
+	// Protocol presence (boolean)
+	"ip":     {5, KindBool},
+	"ipv6":   {6, KindBool},
+	"icmp":   {7, KindBool},
+	"tcp":    {8, KindBool},
+	"udp":    {9, KindBool},
+	"icmpv6": {10, KindBool},
+	// IPv4 header fields
+	"ip.HdrLength": {11, KindUint8},
+	"ip.TOS":       {12, KindUint8},
+	"ip.Length":    {13, KindUint16},
+	"ip.Id":        {14, KindUint16},
+	"ip.DF":        {15, KindBool},
+	"ip.MF":        {16, KindBool},
+	"ip.FragOff":   {17, KindUint16},
+	"ip.TTL":       {18, KindUint8},
+	"ip.Protocol":  {19, KindUint8},
+	"ip.Checksum":  {20, KindUint16},
+	"ip.SrcAddr":   {21, KindIPv4},
+	"ip.DstAddr":   {22, KindIPv4},
+	// IPv6 header fields
+	"ipv6.TrafficClass": {23, KindUint8},
+	"ipv6.FlowLabel":    {24, KindUint32},
+	"ipv6.Length":       {25, KindUint16},
+	"ipv6.NextHdr":      {26, KindUint8},
+	"ipv6.HopLimit":     {27, KindUint8},
+	"ipv6.SrcAddr":      {28, KindIPv6},
+	"ipv6.DstAddr":      {29, KindIPv6},
+	// ICMP header fields
+	"icmp.Type":     {30, KindUint8},
+	"icmp.Code":     {31, KindUint8},
+	"icmp.Checksum": {32, KindUint16},
+	"icmp.Body":     {33, KindUint32},
+	// ICMPv6 header fields
+	"icmpv6.Type":     {34, KindUint8},
+	"icmpv6.Code":     {35, KindUint8},
+	"icmpv6.Checksum": {36, KindUint16},
+	"icmpv6.Body":     {37, KindUint32},
+	// TCP header fields
+	"tcp.SrcPort":       {38, KindUint16},
+	"tcp.DstPort":       {39, KindUint16},
+	"tcp.SeqNum":        {40, KindUint32},
+	"tcp.AckNum":        {41, KindUint32},
+	"tcp.HdrLength":     {42, KindUint8},
+	"tcp.Urg":           {43, KindBool},
+	"tcp.Ack":           {44, KindBool},
+	"tcp.Psh":           {45, KindBool},
+	"tcp.Rst":           {46, KindBool},
+	"tcp.Syn":           {47, KindBool},
+	"tcp.Fin":           {48, KindBool},
+	"tcp.Window":        {49, KindUint16},
+	"tcp.Checksum":      {50, KindUint16},
+	"tcp.UrgPtr":        {51, KindUint16},
+	"tcp.PayloadLength": {52, KindUint16},
+	// UDP header fields
+	"udp.SrcPort":       {53, KindUint16},
+	"udp.DstPort":       {54, KindUint16},
+	"udp.Length":        {55, KindUint16},
+	"udp.Checksum":      {56, KindUint16},
+	"udp.PayloadLength": {57, KindUint16},
+	// Loopback / impostor flags
+	"loopback": {58, KindBool},
+	"impostor": {59, KindBool},
+	// Packet-level meta (all layers)
+	"Length":    {80, KindUint16},
+	"Timestamp": {81, KindUint64},
+	"Random8":   {82, KindUint8},
+	"Random16":  {83, KindUint16},
+	"Random32":  {84, KindUint32},
+	"Fragment":  {85, KindBool},
 }
 
 // LookupField recherche la définition d'un champ par ses parts.

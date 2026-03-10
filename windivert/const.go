@@ -67,6 +67,16 @@ var (
 // IOCTL priority = (int32(priority) + priorityMax), so range [0, 60000].
 const priorityMax = int32(30000)
 
+// Version handshake constants (from windivert_device.h).
+// The DLL sends WINDIVERT_MAGIC_DLL in the IOCTL_INITIALIZE output buffer;
+// the driver validates it, then writes WINDIVERT_MAGIC_SYS back.
+const (
+	windivertMagicDLL = uint64(0x4C4C447669645724)
+	windivertMagicSYS = uint64(0x5359537669645723)
+	windivertMajor    = uint32(2)
+	windivertMinor    = uint32(2)
+)
+
 // Device path WinDivert 2.x.
 const devicePath = `\.\WinDivert`
 

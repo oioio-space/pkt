@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"strconv"
-	"strings"
 )
 
 // Sentinel jump-target values used during compilation (replaced by patchJumps).
@@ -34,14 +33,14 @@ type FilterObject struct {
 }
 
 const (
-	testEQ    uint8 = 0
-	testNEQ   uint8 = 1
-	testLT    uint8 = 2
-	testLE    uint8 = 3
-	testGT    uint8 = 4
-	testGE    uint8 = 5
-	testTrue  uint8 = 6
-	testFalse uint8 = 7
+	testEQ  uint8 = 0
+	testNEQ uint8 = 1
+	testLT  uint8 = 2
+	testLE  uint8 = 3
+	testGT  uint8 = 4
+	testGE  uint8 = 5
+	// Note: WinDivert has no "always-true/false" test code (max valid = 5).
+	// "true"/"false" literals are encoded as Zero EQ/NEQ 0.
 )
 
 // Compile compiles a WinDivert 2.x filter string into bytecode objects.
@@ -65,20 +64,25 @@ type compiler struct {
 func (c *compiler) emit(n Node) error {
 	switch node := n.(type) {
 	case *BoolNode:
-		test := testTrue
+		// "true"  → Zero EQ  0 (ZERO field is always 0, so EQ 0 always succeeds)
+		// "false" → Zero NEQ 0 (always fails → goes to Failure = REJECT)
+		test := testEQ
 		if !node.Value {
-			test = testFalse
+			test = testNEQ
 		}
 		c.prog = append(c.prog, FilterObject{
-			Test: test, Success: acceptSentinel, Failure: rejectSentinel,
+			Field: 0, Test: test, Arg: [4]uint32{}, // Field=ZERO, Arg=0
+			Success: acceptSentinel, Failure: rejectSentinel,
 		})
 	case *FieldNode:
 		def, err := LookupField(node.Parts)
 		if err != nil {
 			return err
 		}
+		// Boolean field reference: field != 0 → true (e.g. "ip" = IPv4 packet present)
 		c.prog = append(c.prog, FilterObject{
-			Field: def.ID, Test: testTrue, Success: acceptSentinel, Failure: rejectSentinel,
+			Field: def.ID, Test: testNEQ, Arg: [4]uint32{},
+			Success: acceptSentinel, Failure: rejectSentinel,
 		})
 	case *CmpNode:
 		return c.emitCmp(node)
@@ -160,20 +164,19 @@ func (c *compiler) emitBinary(n *BinaryNode) error {
 	return nil
 }
 
-// patchJumps replaces remaining sentinels with final ACCEPT/REJECT indices.
+// patchJumps replaces remaining sentinels with the WinDivert wire values.
+// WINDIVERT_FILTER_RESULT_ACCEPT = 0x7FFE, WINDIVERT_FILTER_RESULT_REJECT = 0x7FFF.
 func (c *compiler) patchJumps() {
-	accept := uint16(len(c.prog))   // ACCEPT = one past last instruction
-	reject := uint16(len(c.prog)) + 1 // REJECT = two past last instruction
 	for i := range c.prog {
 		if c.prog[i].Success == acceptSentinel {
-			c.prog[i].Success = accept
+			c.prog[i].Success = 0x7FFE
 		} else if c.prog[i].Success == rejectSentinel {
-			c.prog[i].Success = reject
+			c.prog[i].Success = 0x7FFF
 		}
 		if c.prog[i].Failure == acceptSentinel {
-			c.prog[i].Failure = accept
+			c.prog[i].Failure = 0x7FFE
 		} else if c.prog[i].Failure == rejectSentinel {
-			c.prog[i].Failure = reject
+			c.prog[i].Failure = 0x7FFF
 		}
 	}
 }
@@ -193,22 +196,18 @@ func opToTest(op string) uint8 {
 	case ">=":
 		return testGE
 	}
-	return testTrue
+	return testEQ
 }
 
 func parseValue(raw, tok string, kind FieldKind) ([4]uint32, error) {
 	var arg [4]uint32
 	switch tok {
 	case "number":
-		// raw may be "80" (decimal) or "0x06" (hex with 0x prefix).
-		s := strings.TrimPrefix(strings.TrimPrefix(raw, "0x"), "0X")
-		n, err := strconv.ParseUint(s, 16, 64)
+		// raw is "80" (decimal) or "0x50" (hex with 0x prefix).
+		// Use base 0 so Go selects base-10 for plain digits and base-16 for 0x prefix.
+		n, err := strconv.ParseUint(raw, 0, 64)
 		if err != nil {
-			// Not hex: try decimal
-			n, err = strconv.ParseUint(raw, 10, 64)
-			if err != nil {
-				return arg, fmt.Errorf("invalid number %q", raw)
-			}
+			return arg, fmt.Errorf("invalid number %q", raw)
 		}
 		arg[0] = uint32(n)
 		arg[1] = uint32(n >> 32)

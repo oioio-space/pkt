@@ -19,8 +19,23 @@ type Handle struct {
 	opts  options
 }
 
-// Close closes the WinDivert handle.
+// Shutdown signals the driver to stop delivering packets and unblocks any
+// pending Recv call. Safe to call before Close.
+func (h *Handle) Shutdown() error {
+	var buf [16]byte
+	binary.LittleEndian.PutUint64(buf[0:], 3) // WINDIVERT_SHUTDOWN_BOTH = 0x3
+	var returned uint32
+	return windows.DeviceIoControl(
+		h.win, ioctlCodeShutdown,
+		&buf[0], uint32(len(buf)),
+		nil, 0,
+		&returned, nil,
+	)
+}
+
+// Close shuts down and closes the WinDivert handle.
 func (h *Handle) Close() error {
+	h.Shutdown() // best-effort: unblocks any pending Recv
 	return windows.CloseHandle(h.win)
 }
 
@@ -108,7 +123,13 @@ func (h *Handle) initialize(prog []filter.FilterObject, priority int16, flags ui
 	binary.LittleEndian.PutUint32(ioInit[4:], uint32(int32(priority)+priorityMax))
 	binary.LittleEndian.PutUint64(ioInit[8:], flags)
 
-	var versionBuf [64]byte // WINDIVERT_VERSION output (not used)
+	// WINDIVERT_VERSION output buffer: send DLL magic + version, driver replies with SYS magic.
+	// Layout: magic(8) + major(4) + minor(4) + bits(4) + reserved32[3](12) + reserved64[4](32) = 64 bytes.
+	var versionBuf [64]byte
+	binary.LittleEndian.PutUint64(versionBuf[0:], windivertMagicDLL)
+	binary.LittleEndian.PutUint32(versionBuf[8:], windivertMajor)
+	binary.LittleEndian.PutUint32(versionBuf[12:], windivertMinor)
+	binary.LittleEndian.PutUint32(versionBuf[16:], 64) // bits = 8 * sizeof(void*) on amd64
 	var returned uint32
 	if err := windows.DeviceIoControl(
 		h.win, ioctlCodeInitialize,
@@ -118,10 +139,14 @@ func (h *Handle) initialize(prog []filter.FilterObject, priority int16, flags ui
 	); err != nil {
 		return fmt.Errorf("IOCTL_INITIALIZE: %w", err)
 	}
+	if binary.LittleEndian.Uint64(versionBuf[0:]) != windivertMagicSYS {
+		return fmt.Errorf("IOCTL_INITIALIZE: driver version magic mismatch")
+	}
 
-	// Build STARTUP input: flags = 0 (basic startup).
-	var ioStartup [8]byte
-	binary.LittleEndian.PutUint64(ioStartup[0:], 0)
+	// Build STARTUP input: sizeof(WINDIVERT_IOCTL) = 16 bytes; startup.flags at offset 0.
+	// filter_flags tells the driver which WFP callouts to install (inbound/outbound, IPv4/IPv6).
+	var ioStartup [16]byte
+	binary.LittleEndian.PutUint64(ioStartup[0:], filter.Analyze(prog, uint32(h.layer)))
 
 	filterBytes := filter.Bytes(prog)
 	if err := windows.DeviceIoControl(

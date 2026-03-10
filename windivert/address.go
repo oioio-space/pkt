@@ -5,24 +5,22 @@ package windivert
 import "unsafe"
 
 // Address contient les metadonnees d'un paquet WinDivert (WINDIVERT_ADDRESS).
-// Taille totale: 88 bytes (verifiee contre windivert.h v2.x).
+// Taille totale: 80 bytes (sizeof(WINDIVERT_ADDRESS) verifie dans windivert.c).
 //
 // Layout memoire:
-//   [0x00] Timestamp  int64   (8 bytes)
-//   [0x08] Flags      uint32  (4 bytes) - bitfield layer/event/flags
-//   [0x0C] Reserved2  uint32  (4 bytes)
-//   [0x10] Union      [64]byte (64 bytes) - Network/Flow/Socket/Reflect
-//   [0x50] Reserved3  [2]uint32 (8 bytes)
+//   [0x00] Timestamp  int64    (8 bytes)
+//   [0x08] Flags      uint32   (4 bytes) - bitfield layer/event/sniffed/outbound/...
+//   [0x0C] Reserved2  uint32   (4 bytes)
+//   [0x10] Union      [64]byte (64 bytes) - Network/Flow/Socket/Reflect data
 type Address struct {
 	Timestamp int64
 	Flags     uint32
 	Reserved2 uint32
-	Union     [64]byte
-	Reserved3 [2]uint32
+	Union     [64]byte // WINDIVERT_ADDRESS anonymous union (Network/Flow/Socket/Reflect)
 }
 
-// Verification statique de la taille (88 bytes).
-var _ = [1]struct{}{}[unsafe.Sizeof(Address{})-88]
+// Verification statique de la taille (80 bytes).
+var _ = [1]struct{}{}[unsafe.Sizeof(Address{})-80]
 
 // Layer extrait le layer WinDivert (bits 7:0 de Flags).
 func (a *Address) Layer() Layer { return Layer(a.Flags & 0xFF) }
