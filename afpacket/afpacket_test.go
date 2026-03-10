@@ -23,3 +23,10 @@ func TestOptions(t *testing.T) {
 		t.Error("filter not set")
 	}
 }
+
+func TestHandleSendExists(t *testing.T) {
+	// Vérifie que Send compile — pas d'exécution réseau requise.
+	var h *afpacket.Handle
+	_ = (*afpacket.Handle).Send // compile-time check
+	_ = h
+}
