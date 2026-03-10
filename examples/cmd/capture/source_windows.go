@@ -9,7 +9,7 @@ import (
 
 func newSource(_ string, filterExpr string) (gopacket.PacketDataSource, gopacket.Decoder, error) {
 	if filterExpr == "" {
-		filterExpr = "true" // capture all packets
+		filterExpr = "true"
 	}
 	h, err := windivert.Open(filterExpr, windivert.LayerNetwork, windivert.WithFlags(windivert.FlagSniff))
 	if err != nil {

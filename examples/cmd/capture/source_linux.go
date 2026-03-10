@@ -3,11 +3,17 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"pkt/afpacket"
 )
 
-func newSource(iface, filterExpr string) (gopacket.PacketDataSource, gopacket.Decoder, error) {
+func newSource(iface string, filterExpr string) (gopacket.PacketDataSource, gopacket.Decoder, error) {
+	if iface == "" {
+		return nil, nil, fmt.Errorf("flag -i requis sur Linux")
+	}
 	opts := []afpacket.Option{afpacket.WithPromiscuous(true)}
 	if filterExpr != "" {
 		opts = append(opts, afpacket.WithFilter(filterExpr))
@@ -16,5 +22,5 @@ func newSource(iface, filterExpr string) (gopacket.PacketDataSource, gopacket.De
 	if err != nil {
 		return nil, nil, err
 	}
-	return h, h.LinkType(), nil
+	return h, layers.LayerTypeEthernet, nil
 }

@@ -1,0 +1,67 @@
+//go:build windows
+
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"pkt/windivert"
+)
+
+func main() {
+	filterExpr := flag.String("f", "", "filtre WinDivert — paquets matchant ce filtre seront droppés")
+	verbose    := flag.Bool("v", false, "affiche les détails de chaque paquet droppé")
+	flag.Parse()
+
+	if *filterExpr == "" {
+		fmt.Fprintln(os.Stderr, "flag -f requis (ex: -f \"tcp.DstPort == 443\")")
+		os.Exit(1)
+	}
+
+	// Ouvre sans FlagSniff : les paquets matchant sont retenus par le noyau.
+	// Ne pas appeler Send → ils sont droppés silencieusement.
+	h, err := windivert.Open(*filterExpr, windivert.LayerNetwork)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "open:", err)
+		os.Exit(1)
+	}
+	defer h.Close()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() { <-ctx.Done(); h.Shutdown() }()
+
+	buf := make([]byte, 65535)
+	dropped := 0
+
+	log.Printf("drop actif (filtre: %q) — Ctrl+C pour arrêter", *filterExpr)
+
+	for {
+		n, _, _, err := h.Recv(buf)
+		if err != nil {
+			break
+		}
+		dropped++
+
+		if *verbose {
+			pkt := gopacket.NewPacket(buf[:n], layers.LayerTypeIPv4, gopacket.Default)
+			if ipLayer := pkt.Layer(layers.LayerTypeIPv4); ipLayer != nil {
+				ip := ipLayer.(*layers.IPv4)
+				log.Printf("drop #%d : %v → %v proto=%v size=%d",
+					dropped, ip.SrcIP, ip.DstIP, ip.Protocol, n)
+			} else {
+				log.Printf("drop #%d : %d bytes", dropped, n)
+			}
+		}
+		// Ne pas appeler h.Send → le noyau supprime le paquet
+	}
+	log.Printf("terminé — %d paquets droppés", dropped)
+}
