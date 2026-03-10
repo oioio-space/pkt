@@ -65,6 +65,7 @@ func Open(filterStr string, layer Layer, opts ...Option) (*Handle, error) {
 		return nil, fmt.Errorf("CreateEvent: %w", err)
 	}
 	h.event = ev
+	h.recvBuf = make([]byte, o.SnapLen)
 	if err := h.initialize(prog, o.Priority, o.Flags); err != nil {
 		h.Close()
 		return nil, fmt.Errorf("initialize: %w", err)

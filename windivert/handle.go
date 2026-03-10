@@ -16,11 +16,12 @@ import (
 
 // Handle represents an open WinDivert handle.
 type Handle struct {
-	win   windows.Handle
-	layer Layer
-	opts  options
-	event windows.Handle
-	ov    windows.Overlapped
+	win     windows.Handle
+	layer   Layer
+	opts    options
+	event   windows.Handle
+	ov      windows.Overlapped
+	recvBuf []byte
 }
 
 // Shutdown signals the driver to stop delivering packets and unblocks any
