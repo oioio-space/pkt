@@ -52,10 +52,7 @@ func main() {
 			os.Exit(1)
 		}
 		defer f.Close()
-		lt, ok := decoder.(layers.LinkType)
-		if !ok {
-			lt = layers.LinkTypeEthernet // fallback
-		}
+		lt := layerTypeToLinkType(decoder)
 		pcapWriter = pcapgo.NewWriter(f)
 		if err := pcapWriter.WriteFileHeader(65535, lt); err != nil {
 			fmt.Fprintln(os.Stderr, "pcap header:", err)
@@ -81,4 +78,17 @@ func main() {
 		}
 	}
 	log.Printf("capturé %d paquets", captured)
+}
+
+// layerTypeToLinkType maps a gopacket.Decoder (LayerType) to the
+// corresponding pcap DLT (layers.LinkType) for the pcap file header.
+func layerTypeToLinkType(d gopacket.Decoder) layers.LinkType {
+	switch d {
+	case layers.LayerTypeIPv4:
+		return layers.LinkTypeIPv4 // DLT 228 — raw IPv4 (WinDivert LayerNetwork)
+	case layers.LayerTypeEthernet:
+		return layers.LinkTypeEthernet
+	default:
+		return layers.LinkTypeEthernet
+	}
 }
