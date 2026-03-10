@@ -39,26 +39,20 @@ func main() {
 	defer stop()
 	go func() { <-ctx.Done(); h.Shutdown() }()
 
-	buf := make([]byte, 65535)
+	ps := gopacket.NewPacketSource(h, h.LinkType())
 	dropped := 0
 
 	log.Printf("drop actif (filtre: %q) — Ctrl+C pour arrêter", *filterExpr)
 
-	for {
-		n, _, _, err := h.Recv(buf)
-		if err != nil {
-			break
-		}
+	for pkt := range ps.Packets() {
 		dropped++
-
 		if *verbose {
-			pkt := gopacket.NewPacket(buf[:n], layers.LayerTypeIPv4, gopacket.Default)
 			if ipLayer := pkt.Layer(layers.LayerTypeIPv4); ipLayer != nil {
 				ip := ipLayer.(*layers.IPv4)
 				log.Printf("drop #%d : %v → %v proto=%v size=%d",
-					dropped, ip.SrcIP, ip.DstIP, ip.Protocol, n)
+					dropped, ip.SrcIP, ip.DstIP, ip.Protocol, len(pkt.Data()))
 			} else {
-				log.Printf("drop #%d : %d bytes", dropped, n)
+				log.Printf("drop #%d : %d bytes", dropped, len(pkt.Data()))
 			}
 		}
 		// Ne pas appeler h.Send → le noyau supprime le paquet

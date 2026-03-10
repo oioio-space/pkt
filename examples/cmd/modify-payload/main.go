@@ -40,21 +40,20 @@ func main() {
 	defer stop()
 	go func() { <-ctx.Done(); h.Shutdown() }()
 
-	buf := make([]byte, 65535)
+	ps := gopacket.NewPacketSource(h, h.LinkType())
 	find    := []byte(*findStr)
 	replace := []byte(*replaceStr)
 	modified, forwarded := 0, 0
 
 	log.Printf("interception active (filtre: %q, find: %q → replace: %q)", *filterExpr, *findStr, *replaceStr)
 
-	for {
-		n, addr, _, err := h.Recv(buf)
-		if err != nil {
-			break // handle fermé ou shutdown
+	for pkt := range ps.Packets() {
+		addr := windivert.AddressFromPacket(pkt)
+		if addr == nil {
+			continue
 		}
-		data := buf[:n]
 
-		pkt := gopacket.NewPacket(data, layers.LayerTypeIPv4, gopacket.Default)
+		data := pkt.Data()
 		ipLayer  := pkt.Layer(layers.LayerTypeIPv4)
 		tcpLayer := pkt.Layer(layers.LayerTypeTCP)
 
