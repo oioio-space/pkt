@@ -33,8 +33,11 @@ func WithPriority(p int16) Option { return func(o *options) { o.Priority = p } }
 // WithFlags sets WinDivert flags (FlagSniff, FlagDrop, …).
 func WithFlags(f uint64) Option { return func(o *options) { o.Flags = f } }
 
-// Open installs the WinDivert driver, compiles the filter, and opens a Handle.
-// Requires administrator privileges.
+// Open installs the WinDivert driver if needed, compiles the filter, and opens a Handle.
+// Requires administrator privileges (WinDivert enforces this via its device DACL).
+//
+// If the driver is already running (e.g. after a persistent install), Open skips
+// the SCM install step and opens the device directly.
 //
 // filterStr is a WinDivert 2.x filter expression (e.g. "tcp", "ip and tcp.DstPort == 443").
 // layer is the capture layer (typically LayerNetwork).
@@ -44,18 +47,22 @@ func Open(filterStr string, layer Layer, opts ...Option) (*Handle, error) {
 		opt(&o)
 	}
 
-	if err := driver.Install(assets.Sys64); err != nil {
-		return nil, fmt.Errorf("install driver: %w", err)
+	// Try opening the device first; install the driver only if it is not yet running.
+	win, openErr := driver.OpenDevice()
+	if openErr != nil {
+		if err := driver.Install(assets.Sys64); err != nil {
+			return nil, fmt.Errorf("install driver: %w", err)
+		}
+		win, openErr = driver.OpenDevice()
+	}
+	if openErr != nil {
+		return nil, fmt.Errorf("open device: %w", openErr)
 	}
 
 	prog, err := filter.Compile(filterStr)
 	if err != nil {
+		_ = windows.CloseHandle(win)
 		return nil, fmt.Errorf("compile filter: %w", err)
-	}
-
-	win, err := driver.OpenDevice()
-	if err != nil {
-		return nil, fmt.Errorf("open device: %w", err)
 	}
 
 	h := &Handle{win: win, layer: layer, opts: o}
