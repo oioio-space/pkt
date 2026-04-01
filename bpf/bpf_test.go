@@ -4,7 +4,7 @@ package bpf_test
 
 import (
 	"testing"
-	pkgbpf "github.com/oioio-space/github.com/oioio-space/pkt/bpf"
+	pkgbpf "github.com/oioio-space/pkt/bpf"
 )
 
 func TestCompile(t *testing.T) {
