@@ -1,4 +1,4 @@
-module pkt/bpf
+module github.com/oioio-space/pkt/bpf
 
 go 1.25.0
 

@@ -1,4 +1,4 @@
-module pkt/afpacket
+module github.com/oioio-space/pkt/afpacket
 
 go 1.25.0
 
