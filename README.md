@@ -4,6 +4,26 @@ Go multi-module workspace for cross-platform packet capture. Provides passive sn
 
 Status: working, tested on Windows 11 and Linux (amd64).
 
+## Installation
+
+Each module is independently versioned. Install only what you need:
+
+```sh
+# Cross-platform capture API (recommended starting point)
+go get github.com/oioio-space/pkt/capture@latest
+
+# WinDivert — Windows packet interception (included via capture on Windows)
+go get github.com/oioio-space/pkt/windivert@latest
+
+# AF_PACKET — Linux raw socket capture (included via capture on Linux)
+go get github.com/oioio-space/pkt/afpacket@latest
+
+# BPF — compile pcap-filter expressions for AF_PACKET sockets
+go get github.com/oioio-space/pkt/bpf@latest
+```
+
+> `examples/` contains runnable demos and is not a published module.
+
 ## Features
 
 - Cross-platform capture API (`pkt/capture`) with a single `Open(iface, filter)` call

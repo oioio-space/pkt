@@ -1,7 +1,5 @@
 //go:build linux
 
-// Package bpf compile des expressions pcap-filter en BPF bytecode
-// et attache les filtres à des sockets AF_PACKET via SO_ATTACH_FILTER.
 package bpf
 
 import (
