@@ -6,9 +6,9 @@ import (
 	"fmt"
 
 	"golang.org/x/sys/windows"
-	"pkt/windivert/assets"
-	"pkt/windivert/driver"
-	"pkt/windivert/filter"
+	"github.com/oioio-space/pkt/windivert/assets"
+	"github.com/oioio-space/pkt/windivert/driver"
+	"github.com/oioio-space/pkt/windivert/filter"
 )
 
 type options struct {

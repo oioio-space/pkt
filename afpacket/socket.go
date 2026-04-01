@@ -7,7 +7,7 @@ import (
 	"net"
 
 	"golang.org/x/sys/unix"
-	pkgbpf "pkt/bpf"
+	pkgbpf "github.com/oioio-space/pkt/bpf"
 )
 
 func htons(i uint16) uint16 { return (i << 8) | (i >> 8) }

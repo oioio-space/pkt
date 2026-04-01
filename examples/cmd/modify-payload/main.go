@@ -12,7 +12,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"pkt/windivert"
+	"github.com/oioio-space/pkt/windivert"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"

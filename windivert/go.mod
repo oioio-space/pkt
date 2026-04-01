@@ -1,4 +1,4 @@
-module pkt/windivert
+module github.com/oioio-space/pkt/windivert
 
 go 1.25.0
 
