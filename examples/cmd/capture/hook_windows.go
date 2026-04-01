@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"os"
 
-	"pkt/windivert"
-	"pkt/windivert/driver"
+	"github.com/oioio-space/github.com/oioio-space/pkt/windivert"
+	"github.com/oioio-space/github.com/oioio-space/pkt/windivert/driver"
 )
 
 var installPersistent = flag.Bool("install-persistent", false,
