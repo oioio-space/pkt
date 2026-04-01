@@ -11,15 +11,16 @@ import (
 	"os/signal"
 	"syscall"
 
+	"pkt/windivert"
+
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"pkt/windivert"
 )
 
 func main() {
 	filterExpr := flag.String("f", "", "filtre WinDivert (ex: \"tcp.DstPort == 443\")")
-	mode       := flag.String("mode", "blacklist", "blacklist: droppe ce qui matche | whitelist: laisse passer ce qui matche")
-	verbose    := flag.Bool("v", false, "affiche les détails de chaque paquet droppé")
+	mode := flag.String("mode", "blacklist", "blacklist: droppe ce qui matche | whitelist: laisse passer ce qui matche")
+	verbose := flag.Bool("v", false, "affiche les détails de chaque paquet droppé")
 	flag.Parse()
 
 	if *filterExpr == "" {
@@ -55,18 +56,26 @@ func main() {
 	log.Printf("filtre actif [%s] (filtre WinDivert: %q) — Ctrl+C pour arrêter",
 		*mode, effectiveFilter)
 
-	for pkt := range ps.Packets() {
-		dropped++
-		if *verbose {
-			if ipLayer := pkt.Layer(layers.LayerTypeIPv4); ipLayer != nil {
-				ip := ipLayer.(*layers.IPv4)
-				log.Printf("drop #%d : %v → %v proto=%v size=%d",
-					dropped, ip.SrcIP, ip.DstIP, ip.Protocol, len(pkt.Data()))
-			} else {
-				log.Printf("drop #%d : %d bytes", dropped, len(pkt.Data()))
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			_ = h.Shutdown()
+			break loop
+		case pkt := <-ps.Packets():
+			dropped++
+			if *verbose {
+				if ipLayer := pkt.Layer(layers.LayerTypeIPv4); ipLayer != nil {
+					ip := ipLayer.(*layers.IPv4)
+					log.Printf("drop #%d : %v → %v proto=%v size=%d",
+						dropped, ip.SrcIP, ip.DstIP, ip.Protocol, len(pkt.Data()))
+				} else {
+					log.Printf("drop #%d : %d bytes", dropped, len(pkt.Data()))
+				}
 			}
+			// Ne pas appeler h.Send → le noyau supprime le paquet
 		}
-		// Ne pas appeler h.Send → le noyau supprime le paquet
 	}
+
 	log.Printf("terminé [%s] — %d paquets droppés", *mode, dropped)
 }

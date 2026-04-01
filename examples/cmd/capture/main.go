@@ -8,44 +8,40 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
+
+	"pkt/capture"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
-	"pkt/capture"
 )
 
 func main() {
-	iface   := flag.String("i", "", "interface réseau (requis sur Linux)")
-	filter  := flag.String("f", "", "filtre de capture (WinDivert sur Windows, pcap-filter sur Linux)")
-	count   := flag.Int("n", 0, "nombre de paquets (0 = illimité)")
+	iface := flag.String("i", "", "interface réseau (requis sur Linux)")
+	filter := flag.String("f", "", "filtre de capture (WinDivert sur Windows, pcap-filter sur Linux)")
+	count := flag.Int("n", 0, "nombre de paquets (0 = illimité)")
 	outFile := flag.String("w", "", "fichier pcap de sortie (ex: out.pcap)")
-	installHook()  // Windows : enregistre -install-persistent ; no-op sur Linux
+	installHook() // Windows : enregistre -install-persistent ; no-op sur Linux
 	flag.Parse()
-	runInstall()   // Windows : exécute l'installation si -install-persistent, puis quitte
+	runInstall() // Windows : exécute l'installation si -install-persistent, puis quitte
 
 	src, err := capture.Open(*iface, *filter)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
-
-	var once sync.Once
-	closeSrc := func() { once.Do(func() { _ = src.Close() }) }
-	defer closeSrc()
+	defer src.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go func() { <-ctx.Done(); closeSrc() }()
 
 	var pcapWriter *pcapgo.Writer
 	if *outFile != "" {
 		f, err := os.Create(*outFile)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
-			os.Exit(1)
+			return
 		}
 		defer f.Close()
 		bw := bufio.NewWriterSize(f, 1<<20)
@@ -53,27 +49,35 @@ func main() {
 		pcapWriter = pcapgo.NewWriter(bw)
 		if err := pcapWriter.WriteFileHeader(65535, linkTypeToDLT(src.LinkType())); err != nil {
 			fmt.Fprintln(os.Stderr, "pcap header:", err)
-			os.Exit(1)
+			return
 		}
 		log.Printf("écriture pcap dans %s", *outFile)
 	}
 
 	ps := gopacket.NewPacketSource(src, src.LinkType())
 	captured := 0
-	for pkt := range ps.Packets() {
-		if pcapWriter != nil {
-			ci := pkt.Metadata().CaptureInfo
-			if err := pcapWriter.WritePacket(ci, pkt.Data()); err != nil {
-				log.Printf("pcap write: %v", err)
+
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			break loop
+		case pkt := <-ps.Packets():
+			if pcapWriter != nil {
+				ci := pkt.Metadata().CaptureInfo
+				if err := pcapWriter.WritePacket(ci, pkt.Data()); err != nil {
+					log.Printf("pcap write: %v", err)
+				}
+			} else {
+				fmt.Println(pkt)
 			}
-		} else {
-			fmt.Println(pkt)
-		}
-		captured++
-		if *count > 0 && captured >= *count {
-			break
+			captured++
+			if *count > 0 && captured >= *count {
+				break loop
+			}
 		}
 	}
+
 	log.Printf("capturé %d paquets", captured)
 }
 
