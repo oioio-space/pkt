@@ -11,7 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/oioio-space/github.com/oioio-space/pkt/windivert"
+	"github.com/oioio-space/pkt/windivert"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"

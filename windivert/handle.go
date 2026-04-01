@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
-	"github.com/oioio-space/github.com/oioio-space/pkt/windivert/filter"
+	"github.com/oioio-space/pkt/windivert/filter"
 )
 
 // Handle represents an open WinDivert handle.

@@ -5,7 +5,7 @@ package afpacket_test
 import (
 	"testing"
 
-	"github.com/oioio-space/github.com/oioio-space/pkt/afpacket"
+	"github.com/oioio-space/pkt/afpacket"
 )
 
 func TestOptions(t *testing.T) {
