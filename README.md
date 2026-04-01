@@ -4,6 +4,26 @@ Go multi-module workspace for cross-platform packet capture. Provides passive sn
 
 Status: working, tested on Windows 11 and Linux (amd64).
 
+## Installation
+
+Each module is independently versioned. Install only what you need:
+
+```sh
+# Cross-platform capture API (recommended starting point)
+go get github.com/oioio-space/pkt/capture@latest
+
+# WinDivert — Windows packet interception (included via capture on Windows)
+go get github.com/oioio-space/pkt/windivert@latest
+
+# AF_PACKET — Linux raw socket capture (included via capture on Linux)
+go get github.com/oioio-space/pkt/afpacket@latest
+
+# BPF — compile pcap-filter expressions for AF_PACKET sockets
+go get github.com/oioio-space/pkt/bpf@latest
+```
+
+> `examples/` contains runnable demos and is not a published module.
+
 ## Features
 
 - Cross-platform capture API (`pkt/capture`) with a single `Open(iface, filter)` call
@@ -14,19 +34,50 @@ Status: working, tested on Windows 11 and Linux (amd64).
 - BPF kernel filters on Linux, WinDivert filter expressions on Windows
 - pcap export compatible with Wireshark
 
-## WinDivert vs AF_PACKET vs libpcap
+## Why not libpcap?
 
-| Feature | WinDivert (Windows) | AF_PACKET (Linux) | libpcap |
-|---------|--------------------|--------------------|---------|
-| Platform | Windows only | Linux only | Cross-platform |
-| Packet interception | Yes (drop/modify/reinject) | No (read-only) | No (read-only) |
-| Raw injection | Yes | Yes (sendto) | No |
-| Kernel-level filtering | Yes (WinDivert filter) | Yes (BPF) | Yes (BPF) |
-| Ethernet access | No (IP layer only) | Yes | Yes |
-| Promiscuous mode | No (WFP hooks, all machine traffic) | Yes | Yes |
-| Admin required | Yes | root or CAP_NET_RAW | root or special group |
+libpcap (and its Go wrapper `gopacket/pcap`) is the most common packet capture library. It works on both Windows and Linux and is well-supported. **If passive sniffing is all you need, libpcap is a perfectly fine choice.**
 
-WinDivert hooks into the Windows Filtering Platform (WFP) and sees all traffic on the machine without promiscuous mode. AF_PACKET gives raw socket access to a single interface. libpcap is not used in this workspace.
+This project exists for use cases where libpcap falls short:
+
+| Capability | libpcap / gopacket/pcap | **pkt (WinDivert / AF_PACKET)** |
+|---|---|---|
+| Read packets | Yes | Yes |
+| **Drop packets** | No — read-only copy | **Yes (WinDivert)** |
+| **Modify packets in flight** | No | **Yes (WinDivert)** |
+| **Re-inject modified packets** | No | **Yes (WinDivert)** |
+| Kernel-level filtering | Yes (BPF) | Yes (WinDivert filter / BPF) |
+| CGo dependency | **Yes** — requires libpcap headers + .so/.dll | **No** — pure Go + embedded .sys |
+| Windows driver install | Requires Npcap/WinPcap installed separately | **Embedded** — extracted at runtime |
+| Cross-compile (no CGo) | No | **Yes** (`CGO_ENABLED=0`) |
+
+### Read-only vs interception
+
+libpcap (and `AF_PACKET` on Linux) receives a **copy** of each packet — the original continues through the network stack unaffected. You can inspect traffic but cannot block or alter it.
+
+WinDivert **intercepts** packets at the Windows Filtering Platform (WFP) layer. The packet is **held** until your program calls `h.Send()` to re-inject it (possibly modified), or drops it by not calling `Send`. This enables:
+
+- **Firewalls** — drop packets matching a filter
+- **Traffic shapers / proxies** — hold, rewrite, and re-inject
+- **Protocol fuzzing** — corrupt fields in-flight for testing
+- **Transparent tunnels** — capture, encrypt, forward, re-inject
+
+### No CGo, no external dependency
+
+libpcap requires CGo and a system library (`libpcap.so` on Linux, `Npcap.dll` / `WinPcap.dll` on Windows). This complicates cross-compilation, Docker images, and bare Windows deployments.
+
+`pkt` is `CGO_ENABLED=0` throughout. The WinDivert64.sys driver is embedded in the binary and extracted at runtime — no separate installation step.
+
+### When to use what
+
+| Situation | Recommendation |
+|---|---|
+| Just sniff traffic on Linux | `pkt/afpacket` or `gopacket/pcap` |
+| Just sniff traffic on Windows | `pkt/capture` (simpler) or `gopacket/pcap` (more portable) |
+| Drop / block packets on Windows | **`pkt/windivert`** — only real option |
+| Modify packets in flight on Windows | **`pkt/windivert`** — only real option |
+| Zero CGo, cross-compile from Linux to Windows | **`pkt`** |
+| Already using libpcap everywhere | Stick with `gopacket/pcap` |
 
 ## Finding network interfaces
 
@@ -57,7 +108,7 @@ ls /sys/class/net/
 ### 1. Sniffer — cross-platform (`pkt/capture`)
 
 ```go
-import "pkt/capture"
+import "github.com/oioio-space/pkt/capture"
 
 // Linux — interface required
 src, err := capture.Open("eth0", "tcp port 443")
@@ -79,7 +130,7 @@ for pkt := range ps.Packets() {
 ### 2. Sniffer — WinDivert directly (`pkt/windivert`)
 
 ```go
-import "pkt/windivert"
+import "github.com/oioio-space/pkt/windivert"
 
 h, err := windivert.OpenSniff("tcp.DstPort == 443", windivert.LayerNetwork)
 // equivalent: windivert.Open("tcp.DstPort == 443", windivert.LayerNetwork, windivert.WithFlags(windivert.FlagSniff))
@@ -140,7 +191,7 @@ defer f.Close()
 w := pcapgo.NewWriter(bw)
 _ = w.WriteFileHeader(65535, layers.LinkTypeIPv4)
 
-src, _ := capture.Open("", "tcp") // Windows
+src, _ := capture.Open("", "tcp") // Windows — iface ignored
 defer src.Close()
 
 ps := gopacket.NewPacketSource(src, src.LinkType())
@@ -154,18 +205,15 @@ for pkt := range ps.Packets() {
 
 ```go
 import (
-    "pkt/windivert"
-    "pkt/windivert/driver"
+    "github.com/oioio-space/pkt/windivert"
+    "github.com/oioio-space/pkt/windivert/driver"
 )
 
-// Permanent install + allow non-admin users to capture
-err := windivert.InstallDriver(
-    driver.WithPersistent(), // SERVICE_AUTO_START, stable path in System32\drivers\
-    driver.WithUserAccess(), // DACL: Authenticated Users can open the device
-)
+// Install driver permanently (SERVICE_AUTO_START, stable path in System32\drivers\)
+err := windivert.InstallDriver(driver.WithPersistent())
 ```
 
-After this, non-admin users can call `windivert.Open` without elevation.
+After a persistent install, subsequent calls to `windivert.Open` skip the SCM install step and open the device directly.
 
 ### 7. Get the embedded driver version
 
