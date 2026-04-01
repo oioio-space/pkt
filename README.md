@@ -2,6 +2,11 @@
 
 Go multi-module workspace for cross-platform packet capture. Provides passive sniffing, active packet interception, injection, and modification on Windows (via WinDivert) and passive sniffing on Linux (via AF_PACKET). All sources implement `gopacket.PacketDataSource`.
 
+[![Go Reference — capture](https://pkg.go.dev/badge/github.com/oioio-space/pkt/capture.svg)](https://pkg.go.dev/github.com/oioio-space/pkt/capture)
+[![Go Reference — windivert](https://pkg.go.dev/badge/github.com/oioio-space/pkt/windivert.svg)](https://pkg.go.dev/github.com/oioio-space/pkt/windivert)
+[![Go Reference — afpacket](https://pkg.go.dev/badge/github.com/oioio-space/pkt/afpacket.svg)](https://pkg.go.dev/github.com/oioio-space/pkt/afpacket)
+[![Go Reference — bpf](https://pkg.go.dev/badge/github.com/oioio-space/pkt/bpf.svg)](https://pkg.go.dev/github.com/oioio-space/pkt/bpf)
+
 Status: working, tested on Windows 11 and Linux (amd64).
 
 ## Installation
