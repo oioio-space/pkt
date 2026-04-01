@@ -36,35 +36,74 @@ go get github.com/oioio-space/pkt/bpf@latest
 
 ## Why not libpcap?
 
-libpcap (and its Go wrapper `gopacket/pcap`) is the most common packet capture library. It works on both Windows and Linux and is well-supported. **If passive sniffing is all you need, libpcap is a perfectly fine choice.**
+libpcap (and its Go wrapper `gopacket/pcap`) is the most common packet capture library. It works on both Windows (via Npcap) and Linux and is well-supported. **If passive sniffing is all you need, libpcap is a perfectly fine choice.**
 
 This project exists for use cases where libpcap falls short:
 
-| Capability | libpcap / gopacket/pcap | **pkt (WinDivert / AF_PACKET)** |
-|---|---|---|
-| Read packets | Yes | Yes |
-| **Drop packets** | No — read-only copy | **Yes (WinDivert)** |
-| **Modify packets in flight** | No | **Yes (WinDivert)** |
-| **Re-inject modified packets** | No | **Yes (WinDivert)** |
-| Kernel-level filtering | Yes (BPF) | Yes (WinDivert filter / BPF) |
-| CGo dependency | **Yes** — requires libpcap headers + .so/.dll | **No** — pure Go + embedded .sys |
-| Windows driver install | Requires Npcap/WinPcap installed separately | **Embedded** — extracted at runtime |
-| Cross-compile (no CGo) | No | **Yes** (`CGO_ENABLED=0`) |
+| Capability | libpcap / Npcap | AF_PACKET (Linux) | WinDivert (Windows) |
+|---|---|---|---|
+| Read packets | Yes | Yes | Yes |
+| **Drop packets in transit** | **No** | **No** | **Yes** |
+| **Modify packets in flight** | **No** | **No** | **Yes** |
+| **True re-injection (same packet)** | **No** | **No** | **Yes** |
+| Send independent raw packets | Yes (`pcap_inject`) | Yes (`sendto`) | Yes |
+| Capture layer | **L2 — Ethernet frames** | **L2 — Ethernet frames** | **L3 — IP packets** |
+| See non-IP traffic (ARP, LLDP…) | Yes | Yes | No |
+| See MAC addresses | Yes | Yes | No |
+| Kernel-level filtering | Yes (BPF) | Yes (BPF) | Yes (WinDivert filter) |
+| CGo dependency | **Yes** | No (this lib) | **No** — pure Go |
+| Windows driver | Requires Npcap/WinPcap installed | — | **Embedded**, extracted at runtime |
+| Cross-compile (`CGO_ENABLED=0`) | No | **Yes** | **Yes** |
 
-### Read-only vs interception
+### Copy vs interception
 
-libpcap (and `AF_PACKET` on Linux) receives a **copy** of each packet — the original continues through the network stack unaffected. You can inspect traffic but cannot block or alter it.
+libpcap and AF_PACKET deliver a **copy** of each packet — the original flows through the network stack untouched. `pcap_inject()` and AF_PACKET `sendto()` can send *independent* raw packets, but the original packet is never held or modified.
 
-WinDivert **intercepts** packets at the Windows Filtering Platform (WFP) layer. The packet is **held** until your program calls `h.Send()` to re-inject it (possibly modified), or drops it by not calling `Send`. This enables:
+WinDivert **intercepts** packets at the Windows Filtering Platform (WFP): the packet is **held** until your code calls `h.Send()` to re-inject it (optionally modified), or drops it by not calling `Send`. This is a fundamentally different model that enables:
 
 - **Firewalls** — drop packets matching a filter
 - **Traffic shapers / proxies** — hold, rewrite, and re-inject
 - **Protocol fuzzing** — corrupt fields in-flight for testing
 - **Transparent tunnels** — capture, encrypt, forward, re-inject
 
+### Layer differences: L2 vs L3
+
+libpcap and AF_PACKET operate at **Layer 2** — they deliver raw Ethernet frames, including MAC addresses, VLAN tags, and non-IP protocols (ARP, LLDP, etc.).
+
+WinDivert at `LayerNetwork` operates at **Layer 3** — it delivers IP packets with no Ethernet header. MAC addresses and ARP are not visible. If you need L2 visibility on Windows, libpcap/Npcap is the right tool.
+
+### Position in the Windows network stack
+
+On Windows, both Npcap and WinDivert hook into the **Windows Filtering Platform (WFP)**, but at different levels:
+
+```
+ Application
+     │
+ [ WinSock / TCP/IP stack ]
+     │
+ ┌───┴────────────────────────────────┐
+ │  Windows Filtering Platform (WFP)  │
+ │                                    │
+ │  ← WinDivert callout driver        │  intercepts here — packet is held
+ │    (FWPM_LAYER_OUTBOUND_IPPACKET…) │
+ └───┬────────────────────────────────┘
+     │
+ [ NDIS — Network Driver Interface ]
+     │
+ ┌───┴──────────────────────────┐
+ │  Npcap NDIS filter driver    │  copies here — original flows through
+ └───┬──────────────────────────┘
+     │
+ Network interface card (NIC)
+```
+
+Npcap sits **below** WFP at the NDIS layer — it receives a copy of the raw Ethernet frame after the WFP decision has already been made. It cannot influence routing or firewall decisions.
+
+WinDivert registers a **WFP callout** — it runs *inside* the firewall decision pipeline. The kernel waits for `h.Send()` before forwarding the packet, which is why drop and modify are possible.
+
 ### No CGo, no external dependency
 
-libpcap requires CGo and a system library (`libpcap.so` on Linux, `Npcap.dll` / `WinPcap.dll` on Windows). This complicates cross-compilation, Docker images, and bare Windows deployments.
+libpcap requires CGo and a system library (`libpcap.so` on Linux, `Npcap.dll` on Windows). This complicates cross-compilation, Docker images, and bare Windows deployments.
 
 `pkt` is `CGO_ENABLED=0` throughout. The WinDivert64.sys driver is embedded in the binary and extracted at runtime — no separate installation step.
 
@@ -72,10 +111,12 @@ libpcap requires CGo and a system library (`libpcap.so` on Linux, `Npcap.dll` / 
 
 | Situation | Recommendation |
 |---|---|
-| Just sniff traffic on Linux | `pkt/afpacket` or `gopacket/pcap` |
-| Just sniff traffic on Windows | `pkt/capture` (simpler) or `gopacket/pcap` (more portable) |
-| Drop / block packets on Windows | **`pkt/windivert`** — only real option |
-| Modify packets in flight on Windows | **`pkt/windivert`** — only real option |
+| Sniff traffic on Linux, need Ethernet/MAC/ARP | `gopacket/pcap` or `pkt/afpacket` |
+| Sniff IP traffic on Linux, no CGo | `pkt/afpacket` |
+| Sniff traffic on Windows | `pkt/capture` or `gopacket/pcap` |
+| Need MAC addresses / ARP on Windows | `gopacket/pcap` (Npcap, L2) |
+| **Drop / block packets on Windows** | **`pkt/windivert`** — only real option |
+| **Modify packets in flight on Windows** | **`pkt/windivert`** — only real option |
 | Zero CGo, cross-compile from Linux to Windows | **`pkt`** |
 | Already using libpcap everywhere | Stick with `gopacket/pcap` |
 
